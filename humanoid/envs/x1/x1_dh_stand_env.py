@@ -517,7 +517,7 @@ class X1DHStandEnv(LeggedRobot):
         cycle_time = (episode_steps - self.last_swing_start_time) * self.dt
         cycle_window = self.cfg.rewards.cycle_window
         cycle_rew = torch.clamp(1.0 - torch.abs(cycle_time - self.cycle_target) / cycle_window, 0.0, 1.0)
-        valid_cycle = onset & (self.last_swing_start_time >= 0.0)
+        valid_cycle = self.last_swing_start_time >= 0.0
         self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew, torch.zeros_like(cycle_rew))
 
         new_time = torch.where(onset, episode_steps, self.last_swing_start_time)

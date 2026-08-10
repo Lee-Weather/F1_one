@@ -332,23 +332,23 @@ class X1DHStandCfg(LeggedRobotCfg):
         stride_length_max = 0.35
         
         class scales:
-            feet_clearance = 1.2
+            feet_clearance = 1.0
             # gait
-            feet_air_time = 5.0
-            step_cycle = 5.0
-            feet_height = 1.2
-            stride_length = 4.0
+            feet_air_time = 4.0
+            step_cycle = 3.0
+            feet_height = 1.0
+            stride_length = 2.0
             foot_slip = -0.1
             feet_distance = 0.2
             knee_distance = 0.2
             # contact
             feet_contact_forces = -0.01
             # vel tracking
-            tracking_lin_vel = 1.2
+            tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
             low_speed = 0.2
-            track_vel_hard = 0.3
+            track_vel_hard = 0.5
             # base pos
             default_joint_pos = 2.0
             orientation = 1.
@@ -357,7 +357,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             base_acc = 0.2
             upward = 0.5
             # energy
-            action_smoothness = -0.008
+            action_smoothness = -0.01
             torques = -8e-9
             dof_vel = -2e-8
             dof_acc = -3e-7
