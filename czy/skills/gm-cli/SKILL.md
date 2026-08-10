@@ -805,7 +805,7 @@ Agent 应根据退出码决定下一步操作：
     
 - **视频录制**：`cv2.VideoWriter` 写 mp4 到 `logs/{exp}/play_output.mp4`；SDK 自动检测并上传
     
-- **诊断数据**：保存关节轨迹、速度、接触力等到 `logs/{exp}/play_output/model_diag.pt`
+- **诊断数据**：保存关节轨迹、速度、接触力等到 `logs/{exp}/play_output/model_diag.pt`，并额外输出 `isaac_diag.csv`；CSV 打包为 `logs/{exp}/gm_play/model_isaac_csv.pt` 后由 SDK 上传
     
 - **上传等待**：脚本结尾 `time.sleep(60)` 等待 SDK 完成文件上传
     
@@ -877,23 +877,37 @@ if self.headless == True:
         
     - `[play_gm] Waiting 60s for SDK file upload...` - 等待 SDK 上传
         
-4. `gm task model list --task-id ...` 找 `play_output.mp4`，取 `videoUrlDown` 用 `curl` 下载
+4. `gm task model list --task-id ... --limit 50` 查看产物：找 `fileName=play_output.mp4` 取 `videoUrlDown`，找 `fileName=model_isaac_csv.pt` 取 `policUrlDown`
     
-5. 本地直接播放 `.mp4` 文件（无需解包）
+5. 下载后：MP4 直接播放；`model_isaac_csv.pt` 按“下载视频与 CSV”一节解包得到 `isaac_diag.csv`
     
 
-### 下载视频
+### 下载视频与 CSV（Isaac Gym play）
 
 ```
-# 查看模型列表（包含视频文件）
+# 查看模型列表（包含视频和 CSV 包）
 gm task model list --task-id "TASK_xxx" --limit 50
 
-# 返回结果中找 fileName=play_output.mp4 的项，取 videoUrlDown 字段
-# 用 curl 下载
-curl -L -o x1_playback.mp4 "<videoUrlDown>"
+# 1. 下载 MP4：返回结果中找 fileName=play_output.mp4，取 videoUrlDown
+curl --ssl-no-revoke -L -o play_output.mp4 "<videoUrlDown>"
+
+# 2. 下载 CSV 包：返回结果中找 fileName=model_isaac_csv.pt，取 policUrlDown
+curl --ssl-no-revoke -L -o model_isaac_csv.pt "<policUrlDown>"
+
+# 3. 解包 model_isaac_csv.pt -> isaac_diag.csv（无 torch 也可用 zipfile+pickle）
+python - <<'PY'
+import zipfile, pickle
+with zipfile.ZipFile('model_isaac_csv.pt') as z:
+    data = pickle.load(z.open('model_isaac_csv/data.pkl'))
+with open('isaac_diag.csv', 'wb') as f:
+    f.write(data['bytes'])
+PY
 ```
 
-> **注意**：Isaac Gym 回放的视频是 `.mp4` 文件（SDK 以 `videoUrl` 上传），下载字段是 `videoUrlDown`（不是 `policUrlDown`）。与 Isaac Lab 回放不同，无需 `.pt` 解包步骤。
+> **注意**：
+> - MP4 由 SDK 以 `videoUrl` 上传，下载字段是 `videoUrlDown`；CSV 包是 PT 文件，下载字段是 `policUrlDown`。
+> - 若使用 `torch`，也可用 `torch.load('model_isaac_csv.pt', weights_only=False)['bytes']` 解包。
+> - Windows 下 curl 报 `CRYPT_E_REVOCATION_OFFLINE` 时，加上 `--ssl-no-revoke`。
 
 ### 已验证的关键坑（Isaac Gym 特有）
 
@@ -908,6 +922,10 @@ curl -L -o x1_playback.mp4 "<videoUrlDown>"
 5. **SDK 上传 `.mp4` 文件**：SDK 会自动检测 `logs/{exp}/` 目录下的 `.mp4` 文件并上传为视频（`videoUrl` 字段），无需打包为 `.pt`。但 `cv2.VideoWriter` 写入完成前 SDK 会报 `file is being written`，需确保 `video.release()` 在 SDK 检测前完成。
     
 6. **视频保存路径**：不要保存到 `/personal/`（该目录不存在），保存到 `logs/{exp}/` 目录（SDK 扫描范围）。
+
+7. **CSV 必须放在 SDK 扫描的 PT 目录**：`play_gm.py` 会把 `model_isaac_csv.pt` 写入 `logs/{exp}/gm_play/`；不要放在 `play_output/` 或 `logs/{exp}/` 根目录，否则 SDK 不会上传。
+8. **play 任务结束状态**：Isaac Gym play 任务即使成功，`taskStatus` 也可能显示 `6/Terminated`；以 `gm task model list` 是否出现 `play_output.mp4` 和 `model_isaac_csv.pt` 为准。
+9. **CSV 是打包 PT，不是直接 CSV**：`gm task model list` 不会返回 `.csv` 文件；必须下载 `model_isaac_csv.pt` 后解包。
     
 
 ## 多账号额度管理与自动切换
