@@ -195,8 +195,10 @@ def play(args):
         gymapi.FOLLOW_POSITION,
     )
 
-    # Setup video writer
-    video_path = "/personal/play_output.mp4"
+    # Setup video writer - save to logs dir (not /personal which may not exist)
+    video_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", train_cfg.runner.experiment_name)
+    os.makedirs(video_dir, exist_ok=True)
+    video_path = os.path.join(video_dir, "play_output.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video = cv2.VideoWriter(video_path, fourcc, 50.0, (1920, 1080))
     print(f"[play_gm] Recording video to: {video_path}")
