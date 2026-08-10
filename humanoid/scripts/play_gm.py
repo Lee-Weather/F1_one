@@ -149,6 +149,18 @@ def save_diag_csv(diag_data, experiment_name="x1_dh_stand", num_actions=12, dt=0
     return csv_path
 
 
+def package_csv_as_pt(csv_path, experiment_name="x1_dh_stand"):
+    """Package diagnostic CSV as model_isaac_csv.pt for GM SDK auto-upload"""
+    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "play_output")
+    os.makedirs(log_dir, exist_ok=True)
+    pt_path = os.path.join(log_dir, "model_isaac_csv.pt")
+    with open(csv_path, "r", encoding="utf-8") as f:
+        csv_bytes = f.read().encode("utf-8")
+    torch.save({"bytes": csv_bytes, "filename": os.path.basename(csv_path)}, pt_path)
+    print(f"[play_gm] Packaged CSV ({len(csv_bytes)} bytes) -> {pt_path}")
+    return pt_path
+
+
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
 
@@ -314,6 +326,7 @@ def play(args):
     # Save diagnostic data
     save_diag_data(diag, train_cfg.runner.experiment_name)
     csv_path = save_diag_csv(diag, train_cfg.runner.experiment_name, env_cfg.env.num_actions, env.dt)
+    csv_pt_path = package_csv_as_pt(csv_path, train_cfg.runner.experiment_name)
 
     # Print summary
     print("\n[play_gm] === Playback Summary ===")
@@ -327,6 +340,7 @@ def play(args):
     print(f"  Packaged for upload: logs/{train_cfg.runner.experiment_name}/model_isaac_video.pt")
     print(f"  Diagnostics: logs/{train_cfg.runner.experiment_name}/model_diag.pt")
     print(f"  CSV: {csv_path}")
+    print(f"  CSV packaged for upload: {csv_pt_path}")
 
     # Wait for SDK to detect and upload model files
     import time
