@@ -310,20 +310,29 @@ class X1DHStandCfg(LeggedRobotCfg):
         foot_min_dist = 0.2
         foot_max_dist = 1.0
 
-        target_feet_height = 0.03
-        target_feet_height_max = 0.06
+        target_feet_height = 0.05
+        target_feet_height_max = 0.08
         feet_to_ankle_distance = 0.041
         # if true negative total rewards are clipped at zero (avoids early termination problems)
         only_positive_rewards = True
         # tracking reward = exp(-error*sigma)
         tracking_sigma = 5 
         max_contact_force = 700  # forces above this value are penalized
+        cycle_time_target = 0.7
+        cycle_time_sigma = 0.1
+        swing_time_target = 0.25
+        swing_time_sigma = 0.06
+        min_swing_time = 0.15
+        stride_length_min = 0.20
+        stride_length_max = 0.35
         
         class scales:
-            feet_clearance = 0.5
+            feet_clearance = 1.0
             # gait
-            feet_air_time = 2.0
-            feet_height = 0.5
+            feet_air_time = 4.0
+            step_cycle = 2.0
+            feet_height = 1.0
+            stride_length = 1.5
             foot_slip = -0.1
             feet_distance = 0.2
             knee_distance = 0.2
@@ -343,10 +352,10 @@ class X1DHStandCfg(LeggedRobotCfg):
             base_acc = 0.2
             upward = 0.5
             # energy
-            action_smoothness = -0.002
+            action_smoothness = -0.01
             torques = -8e-9
             dof_vel = -2e-8
-            dof_acc = -1e-7
+            dof_acc = -3e-7
             collision = -1.
             stand_still = 2.0
             termination = -2.0

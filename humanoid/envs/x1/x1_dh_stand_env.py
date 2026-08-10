@@ -236,6 +236,7 @@ class X1DHStandEnv(LeggedRobot):
             else:
                 self.rand_push_force.zero_()
                 self.rand_push_torque.zero_()
+        self._update_step_buffers()
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -431,6 +432,9 @@ class X1DHStandEnv(LeggedRobot):
         self.last_dof_vel[env_ids] = 0.
         self.last_root_vel[env_ids] = 0.
         self.feet_air_time[env_ids] = 0.
+        self.foot_last_contact[env_ids] = False
+        self.last_swing_start_time[env_ids] = -1.0
+        self.last_swing_start_pos[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         
@@ -477,6 +481,35 @@ class X1DHStandEnv(LeggedRobot):
         """
         super()._init_buffers()
         self.gait_time = torch.zeros(self.num_envs, len(self.cfg.commands.gait) ,dtype=torch.int, device=self.device, requires_grad=False)
+        self.num_feet = len(self.feet_indices)
+        self.foot_last_contact = torch.zeros(self.num_envs, self.num_feet, dtype=torch.bool, device=self.device)
+        self.last_swing_start_time = torch.full((self.num_envs, self.num_feet), -1.0, dtype=torch.float, device=self.device)
+        self.last_swing_start_pos = torch.zeros(self.num_envs, self.num_feet, 3, dtype=torch.float, device=self.device)
+        self.foot_cycle_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+        self.foot_stride_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+
+    def _update_step_buffers(self):
+        """Update per-foot swing/cycle/stride bookkeeping once per policy step."""
+        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        swing = ~contact
+        onset = swing & self.foot_last_contact
+        touchdown = contact & ~self.foot_last_contact
+        episode_steps = self.episode_length_buf.unsqueeze(1).float().expand(-1, self.num_feet)
+
+        cycle_time = (episode_steps - self.last_swing_start_time) * self.dt
+        cycle_sigma = self.cfg.rewards.cycle_time_sigma
+        cycle_rew = torch.exp(-torch.square(cycle_time - self.cfg.rewards.cycle_time_target) / (2.0 * cycle_sigma * cycle_sigma))
+        valid_cycle = onset & (self.last_swing_start_time >= 0.0)
+        self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew, torch.zeros_like(cycle_rew))
+
+        horizontal_dist = torch.norm(self.rigid_state[:, self.feet_indices, :2] - self.last_swing_start_pos[:, :, :2], dim=-1)
+        stride_rew = torch.clamp((horizontal_dist - self.cfg.rewards.stride_length_min) / (self.cfg.rewards.stride_length_max - self.cfg.rewards.stride_length_min), 0.0, 1.0)
+        self.foot_stride_rew = torch.where(touchdown, stride_rew, torch.zeros_like(stride_rew))
+
+        self.last_swing_start_time = torch.where(onset, episode_steps, self.last_swing_start_time)
+        self.last_swing_start_pos = torch.where(onset.unsqueeze(-1), self.rigid_state[:, self.feet_indices, :3], self.last_swing_start_pos)
+        self.foot_last_contact = contact
+
 
 # ================================================ Rewards ================================================== #
     def _reward_feet_distance(self):
@@ -526,9 +559,19 @@ class X1DHStandEnv(LeggedRobot):
         self.last_contacts = contact
         first_contact = (self.feet_air_time > 0.) * self.contact_filt
         self.feet_air_time += self.dt
-        air_time = self.feet_air_time.clamp(0, 0.5) * first_contact
+        air_time = self.feet_air_time.clamp(0, 0.5)
+        swing_sigma = self.cfg.rewards.swing_time_sigma
+        air_time_rew = torch.exp(-torch.square(air_time - self.cfg.rewards.swing_time_target) / (2.0 * swing_sigma * swing_sigma))
+        air_time_rew *= (air_time >= self.cfg.rewards.min_swing_time).float()
+        air_time = air_time_rew * first_contact
         self.feet_air_time *= ~self.contact_filt
         return air_time.sum(dim=1)
+
+    def _reward_step_cycle(self):
+        return self.foot_cycle_rew.sum(dim=1)
+
+    def _reward_stride_length(self):
+        return self.foot_stride_rew.sum(dim=1)
 
     def _reward_orientation(self):
         """
