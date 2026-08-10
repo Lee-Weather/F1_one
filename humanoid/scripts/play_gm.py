@@ -84,7 +84,8 @@ def find_checkpoint():
 
 def copy_checkpoint_to_logs(checkpoint_path, experiment_name="x1_dh_stand"):
     """Copy checkpoint to logs directory structure expected by task_registry"""
-    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "gm_play")
+    # task_registry uses: logs/{experiment_name}/exported_data/{load_run}/model_{checkpoint}.pt
+    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "exported_data", "gm_play")
     os.makedirs(log_dir, exist_ok=True)
     dest = os.path.join(log_dir, os.path.basename(checkpoint_path))
     if not os.path.exists(dest):
