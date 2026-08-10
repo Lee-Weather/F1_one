@@ -23,10 +23,12 @@ from isaacgym.torch_utils import *
 
 
 def find_checkpoint():
-    """Search /personal/ and logs/ for model_*.pt checkpoint"""
+    """Search broadly for model_*.pt checkpoint"""
     search_dirs = [
         "/personal",
+        "/workspace",
         os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "x1_dh_stand"),
+        os.getcwd(),
     ]
     for d in search_dirs:
         if not os.path.exists(d):
@@ -35,7 +37,11 @@ def find_checkpoint():
         # List all files in the directory for debugging
         try:
             all_files = os.listdir(d)
-            print(f"[play_gm] Contents of {d}: {all_files}")
+            pt_files = [f for f in all_files if f.endswith('.pt')]
+            if pt_files:
+                print(f"[play_gm] .pt files in {d}: {pt_files}")
+            else:
+                print(f"[play_gm] No .pt files directly in {d} (total files: {len(all_files)})")
         except Exception as e:
             print(f"[play_gm] Cannot list {d}: {e}")
             continue
@@ -43,7 +49,7 @@ def find_checkpoint():
         models = sorted(glob.glob(os.path.join(d, "**", "model_*.pt"), recursive=True))
         # Also try non-recursive
         models += sorted(glob.glob(os.path.join(d, "model_*.pt")))
-        # Also try any .pt file
+        # Also try any .pt file if no model_*.pt found
         if not models:
             models = sorted(glob.glob(os.path.join(d, "**", "*.pt"), recursive=True))
             models += sorted(glob.glob(os.path.join(d, "*.pt")))
