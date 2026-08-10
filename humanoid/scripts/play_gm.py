@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import numpy as np
 import cv2
+import csv
 from isaacgym import gymapi
 import torch
 from datetime import datetime
@@ -116,6 +117,36 @@ def save_diag_data(diag_data, experiment_name="x1_dh_stand"):
     pt_path = os.path.join(log_dir, "model_diag.pt")
     torch.save(diag_data, pt_path)
     print(f"[play_gm] Saved diagnostic data -> {pt_path}")
+
+
+def save_diag_csv(diag_data, experiment_name="x1_dh_stand", num_actions=12, dt=0.01):
+    """Save diagnostic trajectory data as isaac_diag.csv."""
+    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "play_output")
+    os.makedirs(log_dir, exist_ok=True)
+    csv_path = os.path.join(log_dir, "isaac_diag.csv")
+
+    header = ["step", "time_s", "base_height", "base_vel_x", "base_vel_y", "base_vel_yaw",
+              "command_x", "foot_z_l", "foot_z_r", "foot_force_l", "foot_force_r"]
+    header += [f"dof_pos_{i}" for i in range(num_actions)]
+    header += [f"dof_vel_{i}" for i in range(num_actions)]
+    header += [f"dof_torque_{i}" for i in range(num_actions)]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for i in range(len(diag_data["base_height"])):
+            row = [i, round(i * dt, 6), diag_data["base_height"][i],
+                   diag_data["base_vel_x"][i], diag_data["base_vel_y"][i],
+                   diag_data["base_vel_yaw"][i], diag_data["command_x"][i],
+                   diag_data["foot_z_l"][i], diag_data["foot_z_r"][i],
+                   diag_data["foot_force_l"][i], diag_data["foot_force_r"][i]]
+            row += diag_data["dof_pos"][i]
+            row += diag_data["dof_vel"][i]
+            row += diag_data["dof_torque"][i]
+            writer.writerow(row)
+
+    print(f"[play_gm] Saved diagnostic CSV -> {csv_path}")
+    return csv_path
 
 
 def play(args):
@@ -282,6 +313,7 @@ def play(args):
 
     # Save diagnostic data
     save_diag_data(diag, train_cfg.runner.experiment_name)
+    csv_path = save_diag_csv(diag, train_cfg.runner.experiment_name, env_cfg.env.num_actions, env.dt)
 
     # Print summary
     print("\n[play_gm] === Playback Summary ===")
@@ -294,6 +326,7 @@ def play(args):
     print(f"  Video: {video_path}")
     print(f"  Packaged for upload: logs/{train_cfg.runner.experiment_name}/model_isaac_video.pt")
     print(f"  Diagnostics: logs/{train_cfg.runner.experiment_name}/model_diag.pt")
+    print(f"  CSV: {csv_path}")
 
     # Wait for SDK to detect and upload model files
     import time

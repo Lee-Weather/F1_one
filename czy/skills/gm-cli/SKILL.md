@@ -778,21 +778,152 @@ Agent 应根据退出码决定下一步操作：
    - `startScript`、`isOpen`、`runParams`
 4. 仅修改需要变更的字段值，其余字段从 `task info` 返回中原样保留。
 5. 若 edit 返回 500 错误，**禁止盲目重试**，应先分析原因。
+## GM 回放 Isaac Gym 仿真（play 任务录视频）
 
-## roboparty 项目推荐配置
+> 在 GM 容器内用 Isaac Gym Preview 4 的 `play_gm.py` 回放训练好的 checkpoint，输出仿真回放视频；SDK 自动检测 `.mp4` 文件并上传，本地直接下载。
+
+### 适用场景
+
+- 本地没有 Isaac Gym Preview 4，只有 GM 云端环境（BJX00000001 / V000021）
+    
+- 需要验证基于 Isaac Gym 训练的策略（如 AgiBot X1）在仿真中的行为，或生成回放视频
+    
+- 与 Isaac Lab 回放的区别：Isaac Gym 使用独立的 `gymapi` 相机 API 渲染，无需 RTX 驱动
+    
+
+### 关键脚本
+
+`{repo}/humanoid/scripts/play_gm.py`（已内置以下能力）：
+
+- **无 pygame 依赖**：去除手柄输入，适配云端无显示环境
+    
+- **自动搜索 checkpoint**：搜索 `/personal/`、`/workspace/`、cwd 下 `model_*.pt`；若未找到则从 OSS 下载（`FALLBACK_CHECKPOINT_URL` 硬编码）
+    
+- **无头渲染**：通过 `env_cfg.env.enable_headless_render = True` 标志，在 `--headless` 模式下保持 `graphics_device_id=0`（GPU 相机渲染），无需 viewer 窗口
+    
+- **相机跟随**：`gym.attach_camera_to_body()` 绑定到机器人躯干，1920×1080 分辨率
+    
+- **视频录制**：`cv2.VideoWriter` 写 mp4 到 `logs/{exp}/play_output.mp4`；SDK 自动检测并上传
+    
+- **诊断数据**：保存关节轨迹、速度、接触力等到 `logs/{exp}/play_output/model_diag.pt`
+    
+- **上传等待**：脚本结尾 `time.sleep(60)` 等待 SDK 完成文件上传
+    
+
+### 前置条件
+
+`base_task.py` 需添加 `enable_headless_render` 支持（一行改动）：
+
+```
+# graphics device for rendering, -1 for no rendering
+self.graphics_device_id = self.sim_device_id
+if self.headless == True:
+    self.graphics_device_id = -1
+    # Allow headless rendering for video recording (no viewer but GPU camera sensors)
+    if getattr(cfg.env, 'enable_headless_render', False):
+        self.graphics_device_id = self.sim_device_id
+```
+
+### 任务 JSON（Isaac Gym 回放）
+
+> **关键差异**：`trainType=1`（非 `2`），不使用 `checkPointFilePath` / `checkPointMountPath`（Isaac Gym 镜像上 `/personal` 挂载不生效），改为脚本内 OSS 下载 fallback。
+
+```
+{
+  "taskBaseInfo": {
+    "projectId": "PRO_20260731_012",
+    "taskType": "1",
+    "trainType": "1",
+    "taskName": "x1-noref-play-v7",
+    "taskDescription": "Isaac Gym play 回放视频",
+    "taskTag": [],
+    "goodsId": "ESKU000001",
+    "imageId": "BJX00000001",
+    "imageVersion": "V000021",
+    "personalDataPath": ""
+  },
+  "taskCodeInfo": {
+    "codeType": "2",
+    "codeUrl": "[{\"codeUrl\":\"https://github.com/<org>/<repo>.git\",\"versionType\":\"1\",\"versionName\":\"main\"}]",
+    "mainCodeUri": "<repo>/humanoid/scripts/play_gm.py",
+    "hparamsPath": null,
+    "startScript": "gm-run <repo>/humanoid/scripts/play_gm.py --task=x1_dh_stand --headless --num_envs=1",
+    "isOpen": "1"
+  },
+  "runtimeReminderConfig": {
+    "enableRuntimeReminder": false,
+    "reminderDurations": []
+  }
+}
+```
+
+### 步骤
+
+1. **配置 OSS 下载 URL**：编辑 `play_gm.py` 中的 `FALLBACK_CHECKPOINT_URL`，填入源任务的 checkpoint 下载链接（`gm task model list` 返回的 `policUrlDown`）
+    
+2. `gm task create --file ./create-play-gym.json` -> 取 `taskId` -> `gm task run --task-id ...`
+    
+3. 等待任务完成（`taskStatus=6`，约 3-4 分钟），查日志确认关键标记：
+    
+    - `[play_gm] Downloaded checkpoint to ... (9788938 bytes)` - checkpoint 下载成功
+        
+    - `[play_gm] Policy loaded successfully!` - 策略加载成功
+        
+    - `[play_gm] Step 0/2000 | vel_x=...` - 仿真开始运行
+        
+    - `[play_gm] Video saved to .../play_output.mp4 (2000 frames)` - 视频录制完成
+        
+    - `SDK ... Video file (play_output.mp4) uploaded successfully` - SDK 上传完成
+        
+    - `[play_gm] Waiting 60s for SDK file upload...` - 等待 SDK 上传
+        
+4. `gm task model list --task-id ...` 找 `play_output.mp4`，取 `videoUrlDown` 用 `curl` 下载
+    
+5. 本地直接播放 `.mp4` 文件（无需解包）
+    
+
+### 下载视频
+
+```
+# 查看模型列表（包含视频文件）
+gm task model list --task-id "TASK_xxx" --limit 50
+
+# 返回结果中找 fileName=play_output.mp4 的项，取 videoUrlDown 字段
+# 用 curl 下载
+curl -L -o x1_playback.mp4 "<videoUrlDown>"
+```
+
+> **注意**：Isaac Gym 回放的视频是 `.mp4` 文件（SDK 以 `videoUrl` 上传），下载字段是 `videoUrlDown`（不是 `policUrlDown`）。与 Isaac Lab 回放不同，无需 `.pt` 解包步骤。
+
+### 已验证的关键坑（Isaac Gym 特有）
+
+1. **`/personal` 挂载不生效**：Isaac Gym 镜像（BJX00000001/V000021）上 `checkPointMountPath=/personal` 不创建目录，checkpoint 不会被挂载。**解决方案**：使用 `trainType=1` + 脚本内 OSS 下载 fallback。
+    
+2. **import 顺序**：Isaac Gym 要求 `from isaacgym import gymapi` 必须在 `import torch` 之前，否则报 `ImportError: PyTorch was imported before isaacgym modules`。
+    
+3. **headless 渲染**：Isaac Gym 的 `--headless` 标志设置 `graphics_device_id=-1`（禁用所有渲染），导致相机传感器无法工作。**解决方案**：在 `base_task.py` 中添加 `enable_headless_render` 标志，在 headless 模式下保持 `graphics_device_id=0`（GPU 渲染但无 viewer 窗口）。
+    
+4. **checkpoint 路径**：`task_registry.make_alg_runner` 在 `log_root="default"` 时使用 `logs/{exp}/exported_data/{load_run}/model_{checkpoint}.pt` 路径。**解决方案**：`copy_checkpoint_to_logs()` 函数将 checkpoint 复制到 `exported_data/gm_play/` 子目录。
+    
+5. **SDK 上传 `.mp4` 文件**：SDK 会自动检测 `logs/{exp}/` 目录下的 `.mp4` 文件并上传为视频（`videoUrl` 字段），无需打包为 `.pt`。但 `cv2.VideoWriter` 写入完成前 SDK 会报 `file is being written`，需确保 `video.release()` 在 SDK 检测前完成。
+    
+6. **视频保存路径**：不要保存到 `/personal/`（该目录不存在），保存到 `logs/{exp}/` 目录（SDK 扫描范围）。
+    
+
+## 多账号额度管理与自动切换
+## F1-one 项目推荐配置
 
 针对 roboparty 机器人训练项目，推荐使用以下镜像和算力资源：
+目前所有 GM 任务（训练 + 回放）使用的配置：
 
-| 配置项 | 推荐值 |
-|--------|--------|
-| **算力资源** | ESKU000001 (1*4090D*24G) |
+| 配置项 | 值 |
+|---|---|
+| **算力资源** | `ESKU000001`（1×4090D 24G） |
+| **镜像 ID** | `BJX00000001` |
+| **镜像版本** | `V000021` |
+| **镜像内容** | Isaac Gym Preview 4 / Python 3.8 / PyTorch 2.4.1 |
 | **GPU 数量** | 1 |
-| **镜像 ID** | BJX00000178 |
-| **镜像版本** | V000220 |
-| **镜像描述** | IsaacSim:5.1 \| IsaacLab:2.3.2 \| Python:3.11.13 \| PyTorch:2.7.0 \| Ubuntu 22.04.5 |
-| **镜像大小** | 19.2GB |
 
-该镜像原生支持 rsl-rl 3.0.1 和 dict 格式观测值，已在 X1_29 训练任务中验证通过。
 
 ## 多账号额度管理与自动切换
 
@@ -800,7 +931,7 @@ Agent 应根据退出码决定下一步操作：
 
 ### 账号池文件
 
-路径：`czy/skills/lab-notebook/api_key.json`
+路径：`czy/skills/gm-cli/api_key.json`
 
 结构：
 ```json
