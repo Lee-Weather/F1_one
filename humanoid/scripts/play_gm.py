@@ -30,11 +30,27 @@ def find_checkpoint():
     ]
     for d in search_dirs:
         if not os.path.exists(d):
+            print(f"[play_gm] Search dir does not exist: {d}")
             continue
-        models = sorted(glob.glob(os.path.join(d, "model_*.pt")))
+        # List all files in the directory for debugging
+        try:
+            all_files = os.listdir(d)
+            print(f"[play_gm] Contents of {d}: {all_files}")
+        except Exception as e:
+            print(f"[play_gm] Cannot list {d}: {e}")
+            continue
+        # Search for model_*.pt recursively
+        models = sorted(glob.glob(os.path.join(d, "**", "model_*.pt"), recursive=True))
+        # Also try non-recursive
+        models += sorted(glob.glob(os.path.join(d, "model_*.pt")))
+        # Also try any .pt file
+        if not models:
+            models = sorted(glob.glob(os.path.join(d, "**", "*.pt"), recursive=True))
+            models += sorted(glob.glob(os.path.join(d, "*.pt")))
         # Exclude deploy/video/diag files
         models = [m for m in models if "deploy" not in m and "video" not in m and "diag" not in m]
         if models:
+            print(f"[play_gm] Found checkpoint: {models[-1]}")
             return models[-1]  # Return latest
     return None
 
