@@ -10,6 +10,7 @@ import os
 import sys
 import glob
 import shutil
+import subprocess
 import numpy as np
 import cv2
 from isaacgym import gymapi
@@ -20,6 +21,9 @@ from humanoid import LEGGED_GYM_ROOT_DIR
 from humanoid.envs import *
 from humanoid.utils import get_args, export_policy_as_jit, task_registry, Logger
 from isaacgym.torch_utils import *
+
+# Fallback: download checkpoint from OSS if not found locally
+FALLBACK_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F7%2Fmodel_10000_20260807192951A583.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1786927231&Signature=plvA%2B2ra386Vv5WbBblBP%2FQ9gRY%3D"
 
 
 def find_checkpoint():
@@ -58,6 +62,23 @@ def find_checkpoint():
         if models:
             print(f"[play_gm] Found checkpoint: {models[-1]}")
             return models[-1]  # Return latest
+    # Fallback: download from OSS if not found locally
+    print("[play_gm] No local checkpoint found, downloading from OSS...")
+    download_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "x1_dh_stand", "gm_play")
+    os.makedirs(download_dir, exist_ok=True)
+    download_path = os.path.join(download_dir, "model_10000.pt")
+    try:
+        result = subprocess.run(
+            ["curl", "-L", "-o", download_path, FALLBACK_CHECKPOINT_URL],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0 and os.path.exists(download_path):
+            print(f"[play_gm] Downloaded checkpoint to {download_path} ({os.path.getsize(download_path)} bytes)")
+            return download_path
+        else:
+            print(f"[play_gm] Download failed: {result.stderr}")
+    except Exception as e:
+        print(f"[play_gm] Download error: {e}")
     return None
 
 
