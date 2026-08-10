@@ -41,7 +41,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         frame_stack = 66      #all histroy obs num
         short_frame_stack = 5   #short history step
         c_frame_stack = 3  #all histroy privileged obs num
-        num_single_obs = 45
+        num_single_obs = 49
         num_observations = int(frame_stack * num_single_obs)
         single_num_privileged_obs = 57
         single_linvel_index = 39
@@ -50,6 +50,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         num_envs = 4096
         episode_length_s = 24 #episode length in seconds
         num_commands = 3 # vx vy vyaw
+        add_phase_obs = True
 
     class safety:
         # safety factors
@@ -320,6 +321,10 @@ class X1DHStandCfg(LeggedRobotCfg):
         max_contact_force = 700  # forces above this value are penalized
         cycle_time_target = 0.7
         cycle_time_sigma = 0.1
+        cycle_window = 0.15
+        cycle_curriculum_start = 0.35
+        cycle_curriculum_end = 0.7
+        cycle_curriculum_steps = 50000
         swing_time_target = 0.25
         swing_time_sigma = 0.06
         min_swing_time = 0.15
@@ -327,23 +332,23 @@ class X1DHStandCfg(LeggedRobotCfg):
         stride_length_max = 0.35
         
         class scales:
-            feet_clearance = 1.0
+            feet_clearance = 1.2
             # gait
-            feet_air_time = 4.0
-            step_cycle = 2.0
-            feet_height = 1.0
-            stride_length = 1.5
+            feet_air_time = 5.0
+            step_cycle = 5.0
+            feet_height = 1.2
+            stride_length = 4.0
             foot_slip = -0.1
             feet_distance = 0.2
             knee_distance = 0.2
             # contact
             feet_contact_forces = -0.01
             # vel tracking
-            tracking_lin_vel = 1.8
+            tracking_lin_vel = 1.2
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
             low_speed = 0.2
-            track_vel_hard = 0.5
+            track_vel_hard = 0.3
             # base pos
             default_joint_pos = 2.0
             orientation = 1.
@@ -352,7 +357,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             base_acc = 0.2
             upward = 0.5
             # energy
-            action_smoothness = -0.01
+            action_smoothness = -0.008
             torques = -8e-9
             dof_vel = -2e-8
             dof_acc = -3e-7

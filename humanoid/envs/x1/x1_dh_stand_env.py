@@ -371,6 +371,17 @@ class X1DHStandEnv(LeggedRobot):
             self.lagged_base_euler_xyz * self.obs_scales.quat,  # 3
         ), dim=-1)
 
+        if getattr(self.cfg.env, 'add_phase_obs', False):
+            period = self.cfg.rewards.cycle_time_target
+            phase_angle = (self.common_step_counter * self.dt % period) / period * (2.0 * torch.pi)
+            phase_obs = torch.stack((
+                torch.sin(phase_angle).repeat(self.num_envs),
+                torch.cos(phase_angle).repeat(self.num_envs),
+                torch.sin(phase_angle + torch.pi).repeat(self.num_envs),
+                torch.cos(phase_angle + torch.pi).repeat(self.num_envs),
+            ), dim=-1)
+            obs_buf = torch.cat((obs_buf, phase_obs), dim=-1)
+
         if self.cfg.env.num_single_obs == 48:
             stand_command = (torch.norm(self.commands[:, :3], dim=1, keepdim=True) <= self.cfg.commands.stand_com_threshold)
             obs_buf = torch.cat((obs_buf, stand_command),dim=1)
@@ -435,6 +446,8 @@ class X1DHStandEnv(LeggedRobot):
         self.foot_last_contact[env_ids] = False
         self.last_swing_start_time[env_ids] = -1.0
         self.last_swing_start_pos[env_ids] = 0.
+        self.max_stride_dist[env_ids] = 0.
+        self.foot_stride_dense_rew[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         
@@ -487,9 +500,14 @@ class X1DHStandEnv(LeggedRobot):
         self.last_swing_start_pos = torch.zeros(self.num_envs, self.num_feet, 3, dtype=torch.float, device=self.device)
         self.foot_cycle_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.foot_stride_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+        self.max_stride_dist = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+        self.foot_stride_dense_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
 
     def _update_step_buffers(self):
         """Update per-foot swing/cycle/stride bookkeeping once per policy step."""
+        progress = torch.clamp(self.common_step_counter / self.cfg.rewards.cycle_curriculum_steps, 0.0, 1.0)
+        self.cycle_target = self.cfg.rewards.cycle_curriculum_start + (self.cfg.rewards.cycle_curriculum_end - self.cfg.rewards.cycle_curriculum_start) * progress
+
         contact = self.contact_forces[:, self.feet_indices, 2] > 5.
         swing = ~contact
         onset = swing & self.foot_last_contact
@@ -497,17 +515,27 @@ class X1DHStandEnv(LeggedRobot):
         episode_steps = self.episode_length_buf.unsqueeze(1).float().expand(-1, self.num_feet)
 
         cycle_time = (episode_steps - self.last_swing_start_time) * self.dt
-        cycle_sigma = self.cfg.rewards.cycle_time_sigma
-        cycle_rew = torch.exp(-torch.square(cycle_time - self.cfg.rewards.cycle_time_target) / (2.0 * cycle_sigma * cycle_sigma))
+        cycle_window = self.cfg.rewards.cycle_window
+        cycle_rew = torch.clamp(1.0 - torch.abs(cycle_time - self.cycle_target) / cycle_window, 0.0, 1.0)
         valid_cycle = onset & (self.last_swing_start_time >= 0.0)
         self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew, torch.zeros_like(cycle_rew))
 
-        horizontal_dist = torch.norm(self.rigid_state[:, self.feet_indices, :2] - self.last_swing_start_pos[:, :, :2], dim=-1)
-        stride_rew = torch.clamp((horizontal_dist - self.cfg.rewards.stride_length_min) / (self.cfg.rewards.stride_length_max - self.cfg.rewards.stride_length_min), 0.0, 1.0)
-        self.foot_stride_rew = torch.where(touchdown, stride_rew, torch.zeros_like(stride_rew))
+        new_time = torch.where(onset, episode_steps, self.last_swing_start_time)
+        new_pos = torch.where(onset.unsqueeze(-1), self.rigid_state[:, self.feet_indices, :3], self.last_swing_start_pos)
+        self.max_stride_dist = torch.where(onset, torch.zeros_like(self.max_stride_dist), self.max_stride_dist)
 
-        self.last_swing_start_time = torch.where(onset, episode_steps, self.last_swing_start_time)
-        self.last_swing_start_pos = torch.where(onset.unsqueeze(-1), self.rigid_state[:, self.feet_indices, :3], self.last_swing_start_pos)
+        prev_max = self.max_stride_dist
+        horizontal_dist = torch.norm(self.rigid_state[:, self.feet_indices, :2] - new_pos[:, :, :2], dim=-1)
+        new_max = torch.where(swing, torch.max(prev_max, horizontal_dist), prev_max)
+        self.max_stride_dist = new_max
+        stride_delta = new_max - prev_max
+        self.foot_stride_dense_rew = torch.where(swing, stride_delta, torch.zeros_like(stride_delta))
+
+        final_stride = torch.clamp((self.max_stride_dist - self.cfg.rewards.stride_length_min) / (self.cfg.rewards.stride_length_max - self.cfg.rewards.stride_length_min), 0.0, 1.0)
+        self.foot_stride_rew = torch.where(touchdown, final_stride, torch.zeros_like(final_stride))
+
+        self.last_swing_start_time = new_time
+        self.last_swing_start_pos = new_pos
         self.foot_last_contact = contact
 
 
@@ -571,7 +599,7 @@ class X1DHStandEnv(LeggedRobot):
         return self.foot_cycle_rew.sum(dim=1)
 
     def _reward_stride_length(self):
-        return self.foot_stride_rew.sum(dim=1)
+        return (self.foot_stride_dense_rew + self.foot_stride_rew).sum(dim=1)
 
     def _reward_orientation(self):
         """

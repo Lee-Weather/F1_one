@@ -207,6 +207,14 @@ def run_mujoco(policy, cfg, env_cfg):
             obs[0, env_cfg.env.num_commands+2*env_cfg.env.num_actions:env_cfg.env.num_commands+3*env_cfg.env.num_actions] = action
             obs[0, env_cfg.env.num_commands+3*env_cfg.env.num_actions:env_cfg.env.num_commands+3*env_cfg.env.num_actions+3] = omega
             obs[0, env_cfg.env.num_commands+3*env_cfg.env.num_actions+3:env_cfg.env.num_commands+3*env_cfg.env.num_actions+6] = eu_ang
+            if getattr(env_cfg.env, 'add_phase_obs', False) and env_cfg.env.num_single_obs >= 49:
+                period = env_cfg.rewards.cycle_time_target
+                phase = (count_lowlevel * cfg.sim_config.dt) % period
+                phase_angle = phase / period * 2.0 * math.pi
+                obs[0, 45] = math.sin(phase_angle)
+                obs[0, 46] = math.cos(phase_angle)
+                obs[0, 47] = math.sin(phase_angle + math.pi)
+                obs[0, 48] = math.cos(phase_angle + math.pi)
             
             ####### for stand only #######
             if env_cfg.env.add_stand_bool:
