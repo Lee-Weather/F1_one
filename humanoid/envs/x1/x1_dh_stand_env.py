@@ -505,7 +505,7 @@ class X1DHStandEnv(LeggedRobot):
 
     def _update_step_buffers(self):
         """Update per-foot swing/cycle/stride bookkeeping once per policy step."""
-        progress = torch.clamp(self.common_step_counter / self.cfg.rewards.cycle_curriculum_steps, 0.0, 1.0)
+        progress = max(0.0, min(1.0, self.common_step_counter / self.cfg.rewards.cycle_curriculum_steps))
         self.cycle_target = self.cfg.rewards.cycle_curriculum_start + (self.cfg.rewards.cycle_curriculum_end - self.cfg.rewards.cycle_curriculum_start) * progress
 
         contact = self.contact_forces[:, self.feet_indices, 2] > 5.
