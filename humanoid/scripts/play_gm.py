@@ -292,6 +292,12 @@ def play(args):
     print(f"  Packaged for upload: logs/{train_cfg.runner.experiment_name}/model_isaac_video.pt")
     print(f"  Diagnostics: logs/{train_cfg.runner.experiment_name}/model_diag.pt")
 
+    # Wait for SDK to detect and upload model files
+    import time
+    print("[play_gm] Waiting 60s for SDK file upload...")
+    time.sleep(60)
+    print("[play_gm] Done.")
+
 
 if __name__ == "__main__":
     args = get_args()
