@@ -151,7 +151,7 @@ def save_diag_csv(diag_data, experiment_name="x1_dh_stand", num_actions=12, dt=0
 
 def package_csv_as_pt(csv_path, experiment_name="x1_dh_stand"):
     """Package diagnostic CSV as model_isaac_csv.pt for GM SDK auto-upload"""
-    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "play_output")
+    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name)
     os.makedirs(log_dir, exist_ok=True)
     pt_path = os.path.join(log_dir, "model_isaac_csv.pt")
     with open(csv_path, "r", encoding="utf-8") as f:
