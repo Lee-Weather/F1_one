@@ -525,7 +525,11 @@ class X1DHStandEnv(LeggedRobot):
         self.max_stride_dist = torch.where(onset, torch.zeros_like(self.max_stride_dist), self.max_stride_dist)
 
         prev_max = self.max_stride_dist
-        horizontal_dist = torch.norm(self.rigid_state[:, self.feet_indices, :2] - new_pos[:, :, :2], dim=-1)
+        delta_xy = self.rigid_state[:, self.feet_indices, :2] - new_pos[:, :, :2]
+        q = self.base_quat
+        yaw = torch.atan2(2.0 * (q[:, 3] * q[:, 2] + q[:, 0] * q[:, 1]), 1.0 - 2.0 * (q[:, 1] * q[:, 1] + q[:, 2] * q[:, 2]))
+        forward_dist = delta_xy[..., 0] * torch.cos(yaw).unsqueeze(1) + delta_xy[..., 1] * torch.sin(yaw).unsqueeze(1)
+        horizontal_dist = torch.clamp(forward_dist, min=0.0)
         new_max = torch.where(swing, torch.max(prev_max, horizontal_dist), prev_max)
         self.max_stride_dist = new_max
         stride_delta = new_max - prev_max
@@ -600,6 +604,10 @@ class X1DHStandEnv(LeggedRobot):
 
     def _reward_stride_length(self):
         return (self.foot_stride_dense_rew + self.foot_stride_rew).sum(dim=1)
+
+    def _reward_flight_penalty(self):
+        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        return (~contact[:, 0] & ~contact[:, 1]).float()
 
     def _reward_orientation(self):
         """
