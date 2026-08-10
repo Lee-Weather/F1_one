@@ -95,8 +95,9 @@ def copy_checkpoint_to_logs(checkpoint_path, experiment_name="x1_dh_stand"):
 
 
 def package_video_as_pt(video_path, experiment_name="x1_dh_stand"):
-    """Package mp4 video as model_video.pt for GM SDK auto-upload"""
-    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name)
+    """Package mp4 video as model_isaac_video.pt for GM SDK auto-upload"""
+    # Save in a subdirectory so SDK's PT directory scan discovers it
+    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "play_output")
     os.makedirs(log_dir, exist_ok=True)
     pt_path = os.path.join(log_dir, "model_isaac_video.pt")
 
@@ -110,7 +111,7 @@ def package_video_as_pt(video_path, experiment_name="x1_dh_stand"):
 
 def save_diag_data(diag_data, experiment_name="x1_dh_stand"):
     """Save diagnostic trajectory data as model_diag.pt for GM SDK upload"""
-    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name)
+    log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", experiment_name, "play_output")
     os.makedirs(log_dir, exist_ok=True)
     pt_path = os.path.join(log_dir, "model_diag.pt")
     torch.save(diag_data, pt_path)
