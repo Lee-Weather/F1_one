@@ -64,3 +64,5 @@ MUJOCO_LOG.TXT
 # Local secrets and vault metadata
 **/api_key.json
 .obsidian/
+
+czy/data/
