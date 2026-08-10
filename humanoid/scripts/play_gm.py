@@ -12,10 +12,10 @@ import glob
 import shutil
 import numpy as np
 import cv2
+from isaacgym import gymapi
 import torch
 from datetime import datetime
 
-from isaacgym import gymapi
 from humanoid import LEGGED_GYM_ROOT_DIR
 from humanoid.envs import *
 from humanoid.utils import get_args, export_policy_as_jit, task_registry, Logger
