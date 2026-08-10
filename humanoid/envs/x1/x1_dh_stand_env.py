@@ -373,7 +373,7 @@ class X1DHStandEnv(LeggedRobot):
 
         if getattr(self.cfg.env, 'add_phase_obs', False):
             period = self.cfg.rewards.cycle_time_target
-            phase_angle = (self.common_step_counter * self.dt % period) / period * (2.0 * torch.pi)
+            phase_angle = torch.tensor((self.common_step_counter * self.dt % period) / period * (2.0 * torch.pi), device=self.device)
             phase_obs = torch.stack((
                 torch.sin(phase_angle).repeat(self.num_envs),
                 torch.cos(phase_angle).repeat(self.num_envs),
