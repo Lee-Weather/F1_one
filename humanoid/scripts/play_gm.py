@@ -24,7 +24,7 @@ from humanoid.utils import get_args, export_policy_as_jit, task_registry, Logger
 from isaacgym.torch_utils import *
 
 # Fallback: download checkpoint from OSS if not found locally
-FALLBACK_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F11%2Fmodel_3000_20260811214359A096.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1787060823&Signature=o%2B%2BKADl5aEcqlCLjwbNCvWWFpiA%3D"
+FALLBACK_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F11%2Fmodel_3000_20260811230825A015.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1787066222&Signature=DZJD2eDgr%2B0WpnJm2pKusVDRNXI%3D"
 
 
 def find_checkpoint():
