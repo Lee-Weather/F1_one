@@ -12,7 +12,7 @@
 | exp0.5 | 2026-08-11 | 分组关节偏差+脚 yaw+对称奖励；高度/脚朝向改善，但周期/步长/对称略差 | 失败 | TASK_20260811_052 | memokaf419@barumart.com | model_2300.pt |
 | exp0.6 | 2026-08-11 | 强化周期/步长/对称奖励；训练完成但步态更不对称，未达标 | 失败 | TASK_20260811_085 | repefi7583@barumart.com | model_3000.pt |
 | exp0.7 | 2026-08-11 | 回退 exp0.5 权重并小幅强化步长/对称；高度与相位达标，但步频过高、步长与抬脚不足，小碎步未改善 | 失败 | TASK_20260811_100 | repefi7583@barumart.com | model_3000.pt |
-| exp0.8 | 2026-08-11 | 周期奖励改为目标硬区间+强化抬脚/步长/脚朝向；训练中，待回放验证 | 训练中 | TASK_20260811_231 | repefi7583@candaba.com | model_3000.pt |
+| exp0.8 | 2026-08-11 | 周期硬区间+强化抬脚；抬脚达标但周期仍 0.51s、步长倒退、右脚外撇，未达标 | 失败 | TASK_20260811_231 | repefi7583@candaba.com | model_3000.pt |
 
 ## 实验 exp0：无参考轨迹 3000 轮基线
 
@@ -788,6 +788,108 @@ cycle_rew = cycle_rew * ((cycle_time >= self.cycle_target - cycle_window) & (cyc
 | --- | --- |
 | 训练方式 | 从零 |
 | GM 账号 | repefi7583@candaba.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务：TASK_20260811_231，2026-08-11 16:58:15 -> 18:08:10 完成 3000 轮，checkpoint model_3000.pt。
+> 回放任务：TASK_20260811_245，2026-08-11 18:20:21 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.7 | exp0.8 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.609m | 0.613m | ~0.61m | ✅ |
+| 高于 0.60m 占比 | 98.0% | 79.2% | 高 | ✅ |
+| 左/右膝均值 | 0.579/0.549 | 0.661/0.399 rad | 接近默认 | ⚠️ 右膝偏伸 |
+| 脚朝向代理 | -0.077/+0.228 | +0.023/+0.238 rad | ≈0 | ❌ 右脚仍外撇 |
+| 左/右步频 | 1.95/1.95 | 1.90/1.95 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.513/0.513s | 0.526/0.513s | 0.55~0.85s | ❌ |
+| 估算步长 | 0.225m | 0.209m | >=0.30m | ❌ |
+| 左右摆腿时间 | 0.169/0.234s | 0.056/0.367s | 对称 | ❌ 摆腿比 0.15 |
+| 抬脚高度 | 0.016/0.015m | 0.031/0.042m | >=0.03m | ✅ |
+| 相位偏移 | 0.507 | 0.703 | ~0.5 | ❌ |
+| 双支撑 | 20.8% | 15.0% | - | - |
+| 平均速度 | 0.438 m/s | 0.403 m/s | ≈0.5 | ❌ |
+
+**结论**：❌ 未达标（高度/抬脚达标；但周期仍 0.51s、步长倒退到 0.209m、右脚外撇 +0.238、相位 0.70，步态为“左脚几乎不摆 + 右脚长摆”）。
+**根因分析**：
+- 周期硬区间只是“区间外给 0”，策略直接放弃该奖励通道，转而用不对称长摆/短摆刷 `feet_air_time`/`stride_length` 等稠密奖励；
+- `joint_deviation_hip`（-0.5）仍把 hip_yaw 拉向默认值 ±0.31 rad，与 `feet_yaw` 目标（脚朝前）直接冲突，右脚外撇无法消除；
+- `stride_length_min=0.20` 太低，0.209m 仍能拿到少量奖励，策略没有动力迈大步。
+**下一步方向**：
+- 周期奖励改为“区间内奖励 + 区间外负惩罚”，让过快的 0.51s 循环直接亏分；
+- `joint_deviation_hip` 去掉 hip_yaw，只约束 hip_roll/ankle_roll，把脚朝向完全交给 `feet_yaw`；
+- 提高 `stride_length_min` 与 `stride_length` 权重，抬高迈步门槛。
+| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+
+
+## 实验 exp0.9：周期区间外惩罚 + 解除 hip_yaw 约束 + 抬高步长门槛
+
+### 1. 上一实验结果与教训
+> exp0.8：高度 0.613m、抬脚 0.031/0.042m 达标；但周期 0.526/0.513s、步频 1.90/1.95、步长 0.209m、右脚朝向 +0.238 rad、相位 0.703 均未达标，步态变成“左脚几乎不摆 + 右脚长摆”（摆腿 0.056/0.367s）。
+>
+> **核心教训**：周期硬区间只做“区间外归零”，策略直接放弃该通道，用不对称步态刷其他稠密奖励；`joint_deviation_hip` 又把 hip_yaw 拉回默认 ±0.31 rad，和脚朝前目标冲突。
+
+### 2. 本轮修改目标
+- 周期区间外改为负惩罚，让 0.51s 小碎步和不规则慢周期直接亏分，逼策略回到 0.55~0.85s；
+- 解除 hip_yaw 的默认关节约束，让 `feet_yaw` 能真正把脚转到朝前；
+- 抬高步长门槛，推动实际迈步 >=0.30m；
+- 保持高度/抬脚达标，恢复左右对称。
+
+### 3. 修改内容
+
+### 修改一：周期区间外负惩罚
+`_update_step_buffers` 中周期奖励在 exp0.8 高斯硬区间基础上增加区间外线性惩罚：
+```python
+fast_pen = torch.clamp((lower_edge - cycle_time) / (2.0 * cycle_window), min=0.0, max=1.0)
+slow_pen = torch.clamp((cycle_time - upper_edge) / (2.0 * cycle_window), min=0.0, max=1.0)
+outside_pen = (fast_pen + slow_pen) * self.cfg.rewards.cycle_outside_penalty
+cycle_rew = cycle_rew * band - outside_pen
+```
+新增配置 `cycle_outside_penalty = 0.5`；经 `step_cycle=4.0` 加权后，0.51s 快周期每个周期约亏 -80 分/脚。
+
+**理由**：exp0.8 证明“给 0”没用，必须让区间外周期产生净负收益。
+
+### 修改二：解除 hip_yaw 的默认关节约束
+`_reward_joint_deviation_hip` 的关节列表去掉 `hip_yaw`，只保留 `hip_roll` 与 `ankle_roll`。
+
+**理由**：默认姿态 hip_yaw 为 ±0.31 rad（外八），与 `feet_yaw`（脚朝前）冲突；脚朝向交给 `feet_yaw` 控制，避免两个奖励互斥。
+
+### 修改三：抬高步长门槛并加权重
+| 参数 | exp0.8 | exp0.9 | 说明 |
+| --- | --- | --- | --- |
+| stride_length_min | 0.20 | 0.22 | 0.209m 不再得分 |
+| stride_length | 4.5 | 5.5 | 更强推动前向迈步 |
+| feet_air_time | 3.0 | 4.0 | 配合 0.7s 周期强化摆动 |
+| feet_yaw | 3.0 | 4.5 | 配合解除 hip_yaw 约束修正脚朝向 |
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_env.py`：周期区间外负惩罚；`_reward_joint_deviation_hip` 去掉 hip_yaw。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：新增 `cycle_outside_penalty`；调整 stride_length_min/stride_length/feet_air_time/feet_yaw。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | 待定（新建训练任务时确认） |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
