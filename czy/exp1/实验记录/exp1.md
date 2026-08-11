@@ -1155,7 +1155,7 @@ cycle_rew = torch.clamp(cycle_time / self.cycle_target, 0.0, 1.0) * torch.clamp(
 - `feet_yaw` 增加线性负惩罚；
 - 相位奖励改用“本脚最近一个实际周期的一半”作为期望滞后；
 - `default_joint_pos` 回到 exp0.5 的 1.0，并强化 stride/feet_height/clearance/tracking/low_speed。
-| exp0.12 | 2026-08-12 | 脚朝向加线性惩罚+相位按实际周期+强化步长/抬脚/速度；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+| exp0.12 | 2026-08-12 | 脚朝向加线性惩罚+相位按实际周期+强化步长/抬脚/速度；训练中 | 训练中 | TASK_20260812_016 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.12：脚朝向线性惩罚 + 实际周期相位 + 强化步长/抬脚/速度
@@ -1209,7 +1209,7 @@ rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma)) - 0.5 * torch.ab
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零 |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | bipay43147@barumart.com |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
