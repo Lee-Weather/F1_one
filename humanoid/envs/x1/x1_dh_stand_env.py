@@ -448,6 +448,9 @@ class X1DHStandEnv(LeggedRobot):
         self.last_swing_start_pos[env_ids] = 0.
         self.max_stride_dist[env_ids] = 0.
         self.foot_stride_dense_rew[env_ids] = 0.
+        self.last_swing_duration[env_ids] = 0.
+        self.swing_symmetry_rew[env_ids] = 0.
+        self.foot_phase_rew[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         
@@ -502,6 +505,9 @@ class X1DHStandEnv(LeggedRobot):
         self.foot_stride_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.max_stride_dist = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.foot_stride_dense_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+        self.last_swing_duration = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+        self.swing_symmetry_rew = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self.foot_phase_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
 
     def _update_step_buffers(self):
         """Update per-foot swing/cycle/stride bookkeeping once per policy step."""
@@ -519,6 +525,23 @@ class X1DHStandEnv(LeggedRobot):
         cycle_rew = torch.clamp(cycle_time / self.cycle_target, 0.0, 1.0) * torch.clamp(1.0 - (cycle_time - self.cycle_target) / cycle_window, 0.0, 1.0)
         valid_cycle = self.last_swing_start_time >= 0.0
         self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew, torch.zeros_like(cycle_rew))
+
+        swing_dur = (episode_steps - self.last_swing_start_time) * self.dt
+        self.last_swing_duration = torch.where(touchdown, swing_dur, self.last_swing_duration)
+
+        sym_valid = (self.last_swing_duration[:, 0] > 0.0) & (self.last_swing_duration[:, 1] > 0.0)
+        sym_diff = torch.abs(self.last_swing_duration[:, 0] - self.last_swing_duration[:, 1])
+        sym_rew = torch.exp(-sym_diff / self.cfg.rewards.swing_symmetry_sigma)
+        self.swing_symmetry_rew = torch.where(sym_valid, sym_rew, torch.zeros_like(sym_rew))
+
+        other_start = torch.stack((self.last_swing_start_time[:, 1], self.last_swing_start_time[:, 0]), dim=1)
+        time_since_other = (episode_steps - other_start) * self.dt
+        expected_phase = self.cycle_target * 0.5
+        phase_err = torch.square(time_since_other - expected_phase)
+        phase_sigma = self.cfg.rewards.phase_offset_sigma
+        phase_rew = torch.exp(-phase_err / (2.0 * phase_sigma * phase_sigma))
+        phase_valid = onset & (other_start >= 0.0)
+        self.foot_phase_rew = torch.where(phase_valid, phase_rew, torch.zeros_like(phase_rew))
 
         new_time = torch.where(onset, episode_steps, self.last_swing_start_time)
         new_pos = torch.where(onset.unsqueeze(-1), self.rigid_state[:, self.feet_indices, :3], self.last_swing_start_pos)
@@ -608,6 +631,29 @@ class X1DHStandEnv(LeggedRobot):
     def _reward_flight_penalty(self):
         contact = self.contact_forces[:, self.feet_indices, 2] > 5.
         return (~contact[:, 0] & ~contact[:, 1]).float()
+
+    def _reward_swing_symmetry(self):
+        return self.swing_symmetry_rew
+
+    def _reward_phase_offset(self):
+        return self.foot_phase_rew.sum(dim=1)
+
+    def _reward_feet_yaw(self):
+        base_yaw = torch.atan2(2.0 * (self.base_quat[:, 3] * self.base_quat[:, 2] + self.base_quat[:, 0] * self.base_quat[:, 1]), 1.0 - 2.0 * (self.base_quat[:, 1] * self.base_quat[:, 1] + self.base_quat[:, 2] * self.base_quat[:, 2]))
+        yaw_err = wrap_to_pi(self.feet_euler_xyz[:, :, 2] - base_yaw.unsqueeze(1))
+        sigma = self.cfg.rewards.foot_yaw_sigma
+        rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma))
+        return rew.sum(dim=1)
+
+    def _reward_joint_deviation_hip(self):
+        idx = [i for i, name in enumerate(self.dof_names) if ('hip_yaw' in name or 'hip_roll' in name or 'ankle_roll' in name)]
+        diff = self.dof_pos[:, idx] - self.default_dof_pos[:, idx]
+        return torch.sum(torch.abs(diff), dim=1)
+
+    def _reward_joint_deviation_legs(self):
+        idx = [i for i, name in enumerate(self.dof_names) if ('hip_pitch' in name or 'knee_pitch' in name or 'ankle_pitch' in name)]
+        diff = self.dof_pos[:, idx] - self.default_dof_pos[:, idx]
+        return torch.sum(torch.abs(diff), dim=1)
 
     def _reward_orientation(self):
         """
@@ -861,7 +907,9 @@ class X1DHStandEnv(LeggedRobot):
     def _reward_stand_still(self):
         # penalize motion at zero commands
         stand_command = (torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold)
-        r = torch.exp(-torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1))
+        pos_err = torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
+        vel_err = torch.sum(torch.square(self.dof_vel), dim=1)
+        r = torch.exp(-(pos_err + 0.04 * vel_err))
         r = torch.where(stand_command, r.clone(),
                         torch.zeros_like(r))
         return r
