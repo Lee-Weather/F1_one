@@ -1431,4 +1431,6 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | 平均速度 | ≈0.5 m/s | < 0.45 m/s |
 
 ### 7. 实验结果
-> 待训练完成、回放并分析 CSV 后补充。
+> 首次运行 TASK_20260812_022 已完成 5300 轮（从 exp0.5 model_2300 续训），但 SDK 只上传了 resume_model.pt，最终 model_5300.pt 未上传。
+> 已在 train.py 增加“训练后复制最终模型到 logs/ 根目录”的修复，准备重跑。
+> 待重跑完成、回放并分析 CSV 后补充。

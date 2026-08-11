@@ -32,6 +32,7 @@
 
 
 import os
+import shutil
 import urllib.request
 
 from humanoid import LEGGED_GYM_ROOT_DIR
@@ -52,6 +53,16 @@ def train(args):
         ppo_runner.load(resume_path, load_optimizer=False)
         print("[train] Resumed from OSS checkpoint")
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=False)
+    if log_dir is not None:
+        final_it = ppo_runner.current_learning_iteration
+        src = os.path.join(log_dir, "model_{}.pt".format(final_it))
+        if os.path.exists(src):
+            for dst in [
+                os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "model_{}.pt".format(final_it)),
+                os.path.join(LEGGED_GYM_ROOT_DIR, "model_{}.pt".format(final_it)),
+            ]:
+                shutil.copy(src, dst)
+                print("[train] Copied final model to", dst)
 
 if __name__ == '__main__':
     args = get_args()
