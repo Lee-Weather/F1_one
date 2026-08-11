@@ -524,14 +524,15 @@ class X1DHStandEnv(LeggedRobot):
         cycle_window = self.cfg.rewards.cycle_window
         cycle_rew = torch.exp(-0.5 * torch.square((cycle_time - self.cycle_target) / cycle_window))
         band = ((cycle_time >= self.cycle_target - cycle_window) & (cycle_time <= self.cycle_target + cycle_window)).float()
+        cycle_rew = cycle_rew * band
         lower_edge = self.cycle_target - cycle_window
         upper_edge = self.cycle_target + cycle_window
-        fast_pen = torch.clamp((lower_edge - cycle_time) / (2.0 * cycle_window), min=0.0, max=1.0)
-        slow_pen = torch.clamp((cycle_time - upper_edge) / (2.0 * cycle_window), min=0.0, max=1.0)
+        fast_pen = torch.clamp((lower_edge - cycle_time) / cycle_window, min=0.0, max=1.0)
+        slow_pen = torch.clamp((cycle_time - upper_edge) / cycle_window, min=0.0, max=1.0)
         outside_pen = (fast_pen + slow_pen) * self.cfg.rewards.cycle_outside_penalty
-        cycle_rew = cycle_rew * band - outside_pen
+        outside_pen = torch.where(onset, outside_pen, torch.zeros_like(outside_pen))
         valid_cycle = self.last_swing_start_time >= 0.0
-        self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew, torch.zeros_like(cycle_rew))
+        self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew - outside_pen, torch.zeros_like(cycle_rew))
 
         swing_dur = (episode_steps - self.last_swing_start_time) * self.dt
         self.last_swing_duration = torch.where(touchdown, swing_dur, self.last_swing_duration)

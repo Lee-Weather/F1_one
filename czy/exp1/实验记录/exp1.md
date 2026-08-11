@@ -838,7 +838,7 @@ cycle_rew = cycle_rew * ((cycle_time >= self.cycle_target - cycle_window) & (cyc
 - 周期奖励改为“区间内奖励 + 区间外负惩罚”，让过快的 0.51s 循环直接亏分；
 - `joint_deviation_hip` 去掉 hip_yaw，只约束 hip_roll/ankle_roll，把脚朝向完全交给 `feet_yaw`；
 - 提高 `stride_length_min` 与 `stride_length` 权重，抬高迈步门槛。
-| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；训练中 | 训练中 | TASK_20260811_250 | repefi7583@candaba.com | model_3000.pt |
+| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；训练崩坏，跳跃后退，未达标 | 失败 | TASK_20260811_250 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.9：周期区间外惩罚 + 解除 hip_yaw 约束 + 抬高步长门槛
@@ -911,6 +911,106 @@ cycle_rew = cycle_rew * band - outside_pen
 | 抬脚 | >=0.03m | < 0.02m |
 | 脚朝向 | ≈0 | 单脚 > 0.15 rad |
 | 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务：TASK_20260811_250，2026-08-11 18:26:07 -> 21:43:54 完成 3000 轮，checkpoint model_3000.pt。
+> 回放任务：TASK_20260811_266，2026-08-11 21:54:44 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.8 | exp0.9 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.613m | 0.422m | ~0.61m | ❌ |
+| 高于 0.60m 占比 | 79.2% | 29.4% | 高 | ❌ |
+| 左/右膝均值 | 0.661/0.399 | 1.022/1.415 rad | 接近默认 | ❌ |
+| 脚朝向代理 | +0.023/+0.238 | +1.248/-0.681 rad | ≈0 | ❌ |
+| 左/右步频 | 1.90/1.95 | 2.45/2.45 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.526/0.513s | 0.408/0.408s | 0.55~0.85s | ❌ |
+| 估算步长 | 0.209m | -0.089m | >=0.30m | ❌ 后退 |
+| 抬脚高度 | 0.031/0.042m | 0.053/0.067m | >=0.03m | ✅ |
+| 相位偏移 | 0.703 | 0.221 | ~0.5 | ❌ |
+| 双支撑 | 15.0% | 12.2% | - | - |
+| 腾空占比 | 1.0% | 71.9% | 低 | ❌ |
+| 平均速度 | 0.403 m/s | -0.218 m/s | ≈0.5 | ❌ 后退 |
+
+**结论**：❌ 未达标（训练崩坏：机器人变成“连续跳跃 + 后退”，高度仅 0.42m、速度 -0.218m/s、腾空 71.9%）。
+**根因分析**：
+- 稠密区间外惩罚在每个物理步都扣分，与课程式 `cycle_target`（0.35→0.7）冲突，策略直接选择“几乎不落地/快速跳动”逃避惩罚；
+- `feet_air_time` 提到 4.0 进一步鼓励腾空，叠加后步态崩坏；
+- `stride_length_min=0.22` 在崩坏期完全不可达，提供不了有效梯度。
+**下一步方向**：
+- 区间外惩罚改为“起脚事件时稀疏惩罚”，不再在每个物理步扣分；
+- `feet_air_time` 回到 3.0、`stride_length_min` 回到 0.20，避免过度激进；
+- 保留 exp0.9 中正确的方向：`joint_deviation_hip` 去掉 hip_yaw、`feet_yaw=4.5`。
+| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚+回退 air_time/步长门槛；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+
+
+## 实验 exp0.10：周期区间外稀疏事件惩罚 + 回退 air_time/步长门槛
+
+### 1. 上一实验结果与教训
+> exp0.9：训练崩坏，机器人连续跳跃后退（高度 0.422m、速度 -0.218m/s、腾空 71.9%）。
+>
+> **核心教训**：稠密区间外惩罚与课程式 cycle_target 冲突，策略用“几乎不落地”逃避扣分；`feet_air_time=4.0` 又强化了腾空。惩罚应只发生在起脚事件，而不是每个物理步。
+
+### 2. 本轮修改目标
+- 区间外周期惩罚改为“起脚事件时稀疏施加”，让过快/过慢周期只在该事件时扣分，不干扰站姿/腾空的稠密奖励；
+- 回退 `feet_air_time` 与 `stride_length_min`，消除跳跃诱因；
+- 保留 `joint_deviation_hip` 去掉 hip_yaw 与 `feet_yaw=4.5`，继续修正脚朝向；
+- 期望重新回到 exp0.8 的稳定步态，并把周期锁进 0.55~0.85s。
+
+### 3. 修改内容
+
+### 修改一：区间外周期惩罚改为稀疏事件惩罚
+`_update_step_buffers` 中区间外惩罚改为仅在 `onset`（起脚）时施加：
+```python
+outside_pen = (fast_pen + slow_pen) * self.cfg.rewards.cycle_outside_penalty
+outside_pen = torch.where(onset, outside_pen, torch.zeros_like(outside_pen))
+self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew - outside_pen, torch.zeros_like(cycle_rew))
+```
+`cycle_outside_penalty` 从 0.5 提高到 1.5（稀疏事件所以需要更强）。
+
+**理由**：exp0.9 证明稠密扣分会导致跳跃逃避；事件惩罚只影响“这一步起得早/起得晚”，不会惩罚正常的站立支撑。
+
+### 修改二：回退腾空与步长门槛
+| 参数 | exp0.9 | exp0.10 | 说明 |
+| --- | --- | --- | --- |
+| feet_air_time | 4.0 | 3.0 | 回退，避免鼓励腾空 |
+| stride_length_min | 0.22 | 0.20 | 回退，恢复可达梯度 |
+| stride_length | 5.5 | 5.0 | 轻微回调 |
+
+### 修改三：保留 hip_yaw 释放与脚朝向权重
+- 继续保留 `_reward_joint_deviation_hip` 去掉 hip_yaw；
+- `feet_yaw = 4.5`、`foot_yaw_sigma = 0.12` 保持。
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_env.py`：区间外惩罚改为 `onset` 事件时稀疏施加。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：`cycle_outside_penalty` 0.5→1.5；`feet_air_time` 4.0→3.0；`stride_length_min` 0.22→0.20；`stride_length` 5.5→5.0。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | 待定（新建训练任务时确认） |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+| 腾空占比 | 低 | > 20% |
 
 ### 7. 实验结果
 > 待训练完成、回放并分析 CSV 后补充。
