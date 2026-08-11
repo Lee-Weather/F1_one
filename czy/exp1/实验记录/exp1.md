@@ -1364,7 +1364,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 **下一步方向**：
 - 从 exp0.5（最接近达标：高度 0.603、脚朝向 -0.21/-0.02、速度 0.512、步长 0.298）的 `model_2300.pt` 续训，而不是从零训练；
 - 只小幅调整 stride_length 3.0→3.2、step_cycle 4.0→4.2、phase_offset 2.0（actual-cycle），其余保持 exp0.5。
-| exp0.14 | 2026-08-12 | 从 exp0.5 model_2300 续训，微调 stride/step_cycle/phase；训练中 | 训练中 | TASK_20260812_022 | bipay43147@barumart.com | model_5300.pt |
+| exp0.14 | 2026-08-12 | 从 exp0.5 model_2300 续训，微调 stride/step_cycle/phase；重跑中（修复模型上传） | 训练中 | TASK_20260812_023 | bipay43147@barumart.com | model_5300.pt |
 
 
 ## 实验 exp0.14：从 exp0.5 model_2300 续训微调
