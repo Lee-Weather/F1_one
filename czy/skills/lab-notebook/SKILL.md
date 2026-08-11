@@ -8,7 +8,7 @@ description: "管理 Exp1 X1 训练实验笔记。目标文件 czy/exp1/实验�
 ## 目标文件
 
 ```
-czy/exp1/实验记录/exp1.md
+czy/exp1/exp1.md
 ```
 
 **分工**：
@@ -297,3 +297,15 @@ exp{阶段}.{尝试}    或    exp{阶段}（阶段首次尝试可省略 .1）
 3. **索引表与正文状态一致**
 4. **结论分级**：✅达标 / ⚠️部分达标 / ❌未达标，禁止笼统表述
 5. **GM 数据获取**：用 `gm task data get --task-id ... --data-key "Train/mean_reward"` 拉曲线
+
+## 八、数据归档规范
+
+`czy/data/{实验编号}/` 下每个实验子文件夹**只允许存放三个文件**：
+
+| 文件 | 说明 |
+| --- | --- |
+| `model_{N}.pt` | 训练结果模型 checkpoint |
+| `play_output.mp4` | play 回放视频 |
+| `isaac_diag.csv` | play 回放诊断 CSV |
+
+禁止在该目录存放 `model_isaac_csv.pt`、分析 PNG、日志等额外文件。分析图/临时打包文件如需保留，放 `czy/analysis/` 或项目外目录。
