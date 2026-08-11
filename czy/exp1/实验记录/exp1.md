@@ -12,6 +12,7 @@
 | exp0.5 | 2026-08-11 | 分组关节偏差+脚 yaw+对称奖励；高度/脚朝向改善，但周期/步长/对称略差 | 失败 | TASK_20260811_052 | memokaf419@barumart.com | model_2300.pt |
 | exp0.6 | 2026-08-11 | 强化周期/步长/对称奖励；训练完成但步态更不对称，未达标 | 失败 | TASK_20260811_085 | repefi7583@barumart.com | model_3000.pt |
 | exp0.7 | 2026-08-11 | 回退 exp0.5 权重并小幅强化步长/对称；高度与相位达标，但步频过高、步长与抬脚不足，小碎步未改善 | 失败 | TASK_20260811_100 | repefi7583@barumart.com | model_3000.pt |
+| exp0.8 | 2026-08-11 | 周期奖励改为目标硬区间+强化抬脚/步长/脚朝向；训练中，待回放验证 | 训练中 | TASK_20260811_231 | repefi7583@candaba.com | model_3000.pt |
 
 ## 实验 exp0：无参考轨迹 3000 轮基线
 
@@ -732,3 +733,82 @@
 
 ### 5. 数据归档
 - czy/data/exp0_7/：model_3000.pt、play_output.mp4、isaac_diag.csv（仅 3 个文件）。
+
+
+## 实验 exp0.8：周期硬区间奖励 + 强化抬脚/步长/脚朝向
+
+### 1. 上一实验结果与教训
+> exp0.7：高度 0.609m（98% > 0.60）与相位 0.507 已达标；但步频 1.95/1.95、周期 0.513s、步长 0.225m、抬脚 0.016/0.015m、右脚朝向 +0.228 rad、平均速度 0.438 m/s 均未达标，仍是小碎步。
+>
+> **核心教训**：原 `step_cycle` 是“从 0 开始斜坡上升”的稠密奖励，0.51s 的小碎步在目标周期以下仍能拿到约 73% 的奖励；只调权重无法消除这个漏洞，必须改奖励形状，直接砍掉区间外的周期奖励。
+
+### 2. 本轮修改目标
+- 用硬区间周期奖励把单腿周期锁进 0.55~0.85s（目标 0.7s），消除高频小碎步；  
+- 强化抬脚奖励，让摆动脚踝离地 >=0.03m；  
+- 强化步长与脚朝向，并把步长推到 >=0.30m、脚朝向回到 ≈0；  
+- 保持高度 ~0.61m 与相位 ~0.5。
+
+### 3. 修改内容
+
+### 修改一：周期奖励改为目标区间内的高斯奖励
+`_update_step_buffers` 中 `cycle_rew` 从“斜坡×三角窗”改为：
+```python
+cycle_rew = torch.exp(-0.5 * torch.square((cycle_time - self.cycle_target) / cycle_window))
+cycle_rew = cycle_rew * ((cycle_time >= self.cycle_target - cycle_window) & (cycle_time <= self.cycle_target + cycle_window)).float()
+```
+最终 `cycle_target=0.7`、`cycle_window=0.15` 时只有 `0.55~0.85s` 能拿到周期奖励，0.51s 的小碎步直接归零；超过 0.85s 也被截断，防止慢周期靠稠密累计钻空子。
+
+**理由**：直接修掉 exp0.7 发现的奖励漏洞，比继续调 `step_cycle` 权重更有效。
+
+### 修改二：强化抬脚奖励
+| 参数 | exp0.7 | exp0.8 | 说明 |
+| --- | --- | --- | --- |
+| feet_height | 0.8 | 1.8 | 摆动脚踝高度更接近 0.05m |
+| feet_clearance | 1.0 | 2.0 | 摆动中抬脚 0.05~0.08m 更受奖励 |
+
+**理由**：exp0.7 抬脚仅 0.016m，摆动高度约束太弱。
+
+### 修改三：步长/脚朝向/速度权重
+| 参数 | exp0.7 | exp0.8 | 说明 |
+| --- | --- | --- | --- |
+| stride_length | 3.5 | 4.5 | 推动前向迈步 >=0.30m |
+| feet_yaw | 1.5 | 3.0 | 修正右脚外撇 |
+| foot_yaw_sigma | 0.15 | 0.12 | 收紧脚朝向容忍度 |
+| swing_symmetry | 2.0 | 1.5 | 回到 exp0.5 水平，避免“高频同相小碎步” |
+| tracking_lin_vel | 2.0 | 2.5 | 平均速度更接近指令 0.5 m/s |
+
+**理由**：周期硬区间后摆动时间变长，配合更高的步长/脚朝向权重应能改善步态。
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_env.py`：周期奖励改为带上下界的硬区间高斯奖励。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：调整 feet_height/feet_clearance/stride_length/feet_yaw/foot_yaw_sigma/swing_symmetry/tracking_lin_vel 权重。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | repefi7583@candaba.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 待训练完成、回放并分析 CSV 后补充。
