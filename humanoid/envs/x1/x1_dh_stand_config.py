@@ -322,7 +322,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         max_contact_force = 700  # forces above this value are penalized
         cycle_time_target = 0.7
         cycle_time_sigma = 0.1
-        cycle_window = 0.15
+        cycle_window = 0.12
         cycle_curriculum_start = 0.35
         cycle_curriculum_end = 0.7
         cycle_curriculum_steps = 50000
@@ -332,16 +332,16 @@ class X1DHStandCfg(LeggedRobotCfg):
         stride_length_min = 0.20
         stride_length_max = 0.35
         foot_yaw_sigma = 0.15
-        swing_symmetry_sigma = 0.08
-        phase_offset_sigma = 0.1
+        swing_symmetry_sigma = 0.05
+        phase_offset_sigma = 0.08
         
         class scales:
             feet_clearance = 1.0
             # gait
             feet_air_time = 3.0
-            step_cycle = 4.0
+            step_cycle = 6.0
             feet_height = 0.8
-            stride_length = 3.0
+            stride_length = 4.0
             foot_slip = -0.2
             feet_distance = 0.2
             knee_distance = 0.2
@@ -364,8 +364,8 @@ class X1DHStandCfg(LeggedRobotCfg):
             joint_deviation_hip = -0.5
             joint_deviation_legs = -0.05
             feet_yaw = 1.5
-            swing_symmetry = 1.5
-            phase_offset = 1.5
+            swing_symmetry = 3.0
+            phase_offset = 3.0
             base_acc = 0.2
             upward = 0.5
             # energy
