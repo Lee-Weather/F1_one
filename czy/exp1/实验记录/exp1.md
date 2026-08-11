@@ -940,7 +940,7 @@ cycle_rew = cycle_rew * band - outside_pen
 - 区间外惩罚改为“起脚事件时稀疏惩罚”，不再在每个物理步扣分；
 - `feet_air_time` 回到 3.0、`stride_length_min` 回到 0.20，避免过度激进；
 - 保留 exp0.9 中正确的方向：`joint_deviation_hip` 去掉 hip_yaw、`feet_yaw=4.5`。
-| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚+回退 air_time/步长门槛；训练中 | 训练中 | TASK_20260811_270 | repefi7583@candaba.com | model_3000.pt |
+| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚；hip_yaw 失控、周期 0.36s、步长 0.097m，未达标 | 失败 | TASK_20260811_270 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.10：周期区间外稀疏事件惩罚 + 回退 air_time/步长门槛
@@ -1011,6 +1011,120 @@ self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew - outside_pen, torch.ze
 | 脚朝向 | ≈0 | 单脚 > 0.15 rad |
 | 平均速度 | ≈0.5 m/s | < 0.45 m/s |
 | 腾空占比 | 低 | > 20% |
+
+### 7. 实验结果
+> 训练任务：TASK_20260811_270，2026-08-11 22:01:21 -> 23:08:20 完成 3000 轮，checkpoint model_3000.pt。
+> 回放任务：TASK_20260811_279，2026-08-11 23:25:57 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.9 | exp0.10 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.422m | 0.592m | ~0.61m | ❌ |
+| 高于 0.60m 占比 | 29.4% | 26.2% | 高 | ❌ |
+| 左/右膝均值 | 1.022/1.415 | 0.314/0.638 rad | 接近默认 | ⚠️ |
+| 脚朝向代理 | +1.248/-0.681 | +1.243/+1.441 rad | ≈0 | ❌ 双脚外撇 |
+| 左/右步频 | 2.45/2.45 | 2.80/2.15 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.408/0.408s | 0.357/0.465s | 0.55~0.85s | ❌ |
+| 估算步长 | -0.089m | 0.097m | >=0.30m | ❌ |
+| 抬脚高度 | 0.053/0.067m | 0.020/0.021m | >=0.03m | ❌ |
+| 相位偏移 | 0.221 | 0.798 | ~0.5 | ❌ |
+| 双支撑 | 12.2% | 7.4% | - | - |
+| 平均速度 | -0.218 m/s | 0.235 m/s | ≈0.5 | ❌ |
+
+**结论**：❌ 未达标（hip_yaw 完全失控，双脚外撇 +1.24/+1.44 rad；周期 0.36s、步长 0.097m，步态退化）。
+**根因分析**：
+- exp0.9 把 `joint_deviation_hip` 里的 hip_yaw 去掉后，hip_yaw 没有任何约束，`feet_yaw=4.5` 的欧拉角奖励被其他稠密奖励压制，双脚外撇反而更严重；
+- 稀疏事件惩罚让策略避开正常站姿，用高频短步继续钻空子；
+- 反复改周期奖励形状反而破坏了 exp0.5 已验证的相对均衡状态。
+**下一步方向**：
+- 完全回退 exp0.8~0.10 的周期奖励与 hip_yaw 改动，恢复 exp0.5 的稳定配置；
+- 基于 exp0.3（周期/步频/步长/抬脚全达标）与 exp0.5（高度/脚朝向/速度达标）的证据，做小幅微调；
+- 放宽 default_joint_pos/knee_extension/joint_deviation_legs 等过强约束，只小幅提高 stride_length 与 phase_offset。
+| exp0.11 | 2026-08-11 | 回退 exp0.5 配置，放宽约束并小幅推步长/相位；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+
+
+## 实验 exp0.11：恢复 exp0.5 均衡配置 + 放宽约束 + 小幅推步长/相位
+
+### 1. 上一实验结果与教训
+> exp0.10：hip_yaw 失控（+1.24/+1.44 rad）、周期 0.357/0.465s、步长 0.097m，步态退化。
+> exp0.3 曾同时达标周期 0.767/0.800s、步频 1.25/1.20、步长 0.364m、抬脚 0.033/0.076m；exp0.5 达标高度 0.603m、脚朝向 -0.21/-0.02 rad、速度 0.512 m/s。
+>
+> **核心教训**：exp0.8~0.10 反复改周期奖励形状和 hip_yaw 约束全部失败；exp0.5 是已验证最均衡的状态，应以此为基底小幅微调，而不是继续大改奖励逻辑。
+
+### 2. 本轮修改目标
+- 恢复 exp0.3 验证过的原始周期奖励公式；
+- 恢复 `joint_deviation_hip` 包含 hip_yaw，防止外撇失控；
+- 以 exp0.5 配置为基底，放宽 `default_joint_pos`/`knee_extension`/`joint_deviation_legs` 等过强约束；
+- 小幅提高 `stride_length` 与 `phase_offset`，期望补齐步长与相位。
+
+### 3. 修改内容
+
+### 修改一：恢复原始周期奖励
+`_update_step_buffers` 恢复 exp0.3 的斜坡×三角窗公式：
+```python
+cycle_rew = torch.clamp(cycle_time / self.cycle_target, 0.0, 1.0) * torch.clamp(1.0 - (cycle_time - self.cycle_target) / cycle_window, 0.0, 1.0)
+```
+移除 `cycle_outside_penalty`。
+
+**理由**：exp0.3 用该公式同时达标周期/步频/步长/抬脚；exp0.8~0.10 的所有周期奖励改动均失败。
+
+### 修改二：恢复 hip_yaw 约束
+`_reward_joint_deviation_hip` 恢复包含 `hip_yaw`。
+
+**理由**：exp0.9/0.10 去掉 hip_yaw 后双脚外撇失控。
+
+### 修改三：以 exp0.5 为基底放宽约束
+| 参数 | exp0.5 | exp0.10 | exp0.11 |
+| --- | --- | --- | --- |
+| default_joint_pos | 1.0 | 1.0 | 2.0 |
+| knee_extension | 0.6 | 0.3 | 0.3 |
+| joint_deviation_legs | -0.05 | 0.0 | 0.0 |
+| feet_clearance | 1.0 | 2.0 | 1.0 |
+| feet_height | 0.8 | 1.8 | 0.8 |
+| feet_air_time | 3.0 | 3.0 | 3.0 |
+| flight_penalty | -2.0 | -2.0 | -2.0 |
+| tracking_lin_vel | 2.0 | 2.5 | 2.0 |
+
+### 修改四：小幅推步长与相位
+| 参数 | exp0.5 | exp0.11 |
+| --- | --- | --- |
+| stride_length | 3.0 | 3.2 |
+| phase_offset | 1.5 | 2.0 |
+| feet_yaw | 1.5 | 1.5 |
+| swing_symmetry | 1.5 | 1.5 |
+| base_height | 1.0 | 1.0 |
+
+**理由**：exp0.5 步长 0.292m 只差 0.008m，相位 0.379 偏低；小幅提高可补足，而不破坏高度/脚朝向/速度。
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_env.py`：周期奖励恢复原始公式；`_reward_joint_deviation_hip` 恢复包含 hip_yaw。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：移除 cycle_outside_penalty；按上表调整权重。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | 待定（新建训练任务时确认） |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
 
 ### 7. 实验结果
 > 待训练完成、回放并分析 CSV 后补充。
