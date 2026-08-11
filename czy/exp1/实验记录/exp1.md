@@ -1259,7 +1259,7 @@ rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma)) - 0.5 * torch.ab
 - `_reward_feet_yaw` 改为直接使用 `dof_pos` 的 hip_yaw+ankle_roll；
 - 奖励整体回到 exp0.3 基底（stride 2.5、feet_height 0.8、feet_clearance 1.0、flight -1.0、tracking 2.0、low_speed 0.5、default_joint_pos 2.0）；
 - 只叠加 base_height 0.8、direct feet_yaw 2.5、actual-cycle phase 1.5。
-| exp0.13 | 2026-08-12 | 回到 exp0.3 步态基底，直接惩罚 hip_yaw+ankle_roll 脚朝向；训练中 | 训练中 | TASK_20260812_020 | bipay43147@barumart.com | model_3000.pt |
+| exp0.13 | 2026-08-12 | exp0.3 基底+直接关节脚朝向；脚朝向达标但步频 3.05、步长 0.165m，未达标 | 失败 | TASK_20260812_020 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.13：exp0.3 步态基底 + 直接关节脚朝向惩罚
@@ -1326,6 +1326,97 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | 镜像 | BJX00000001, V000021 |
 | 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
 | 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务：TASK_20260812_020，2026-08-12 03:47:28 -> 04:52:47 完成 3000 轮，checkpoint model_3000.pt。
+> 回放任务：TASK_20260812_021，2026-08-12 05:11:15 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.11 | exp0.13 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.606m | 0.596m | ~0.61m | ⚠️ |
+| 高于 0.60m 占比 | 71.4% | 18.4% | 高 | ❌ |
+| 左/右膝均值 | 0.366/0.574 | 0.678/0.115 rad | 接近默认 | ⚠️ |
+| 脚朝向代理 | +0.293/+1.397 | +0.020/-0.029 rad | ≈0 | ✅ |
+| 左/右步频 | 1.80/1.75 | 3.05/3.10 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.555/0.571s | 0.328/0.322s | 0.55~0.85s | ❌ |
+| 估算步长 | 0.191m | 0.165m | >=0.30m | ❌ |
+| 左右摆腿时间 | 0.064/0.449s | 0.053/0.248s | 对称 | ❌ 摆腿比 0.21 |
+| 抬脚高度 | 0.024/0.023m | 0.027/0.059m | >=0.03m | ⚠️ |
+| 相位偏移 | 0.684 | 0.763 | ~0.5 | ❌ |
+| 平均速度 | 0.339 m/s | 0.507 m/s | ≈0.5 | ✅ |
+
+**结论**：❌ 未达标（直接关节脚朝向惩罚成功把双脚摆正 +0.02/-0.03，但步频飙到 3.05、步长 0.165m，步态变成高频小碎步）。
+**根因分析**：
+- 直接惩罚 `hip_yaw+ankle_roll` 与默认姿态 ±0.31 rad 冲突过强，策略选择高频小碎步来维持脚朝前与平衡；
+- 从零训练每次都会被多目标权重重新扰动，很难同时守住步态与姿态。
+**下一步方向**：
+- 从 exp0.5（最接近达标：高度 0.603、脚朝向 -0.21/-0.02、速度 0.512、步长 0.298）的 `model_2300.pt` 续训，而不是从零训练；
+- 只小幅调整 stride_length 3.0→3.2、step_cycle 4.0→4.2、phase_offset 2.0（actual-cycle），其余保持 exp0.5。
+| exp0.14 | 2026-08-12 | 从 exp0.5 model_2300 续训，微调 stride/step_cycle/phase；待训练 | 待训练 | TASK_TBD | 待定 | model_5300.pt |
+
+
+## 实验 exp0.14：从 exp0.5 model_2300 续训微调
+
+### 1. 上一实验结果与教训
+> exp0.13：直接关节脚朝向惩罚让脚朝向达标，但步频 3.05、步长 0.165m；从零训练每次都会被多目标权重扰动。
+> exp0.5 是最接近全达标的配置：高度 0.603m、脚朝向 -0.21/-0.02 rad、速度 0.512 m/s、步长 0.298m、步频 1.85/1.60、周期 0.540/0.625s。
+>
+> **核心教训**：与其每次从零重新训练并赌多目标平衡，不如从 exp0.5 已经接近达标的模型继续微调，只改 3 个参数。
+
+### 2. 本轮修改目标
+- 从 exp0.5 `model_2300.pt` 续训 3000 轮（最终 checkpoint model_5300.pt）；
+- `stride_length` 3.0 -> 3.2，把步长从 0.298 推到 >=0.30m；
+- `step_cycle` 4.0 -> 4.2，把左腿步频 1.85 压回 <=1.8；
+- `phase_offset` 2.0 + actual-cycle 相位，把相位从 0.379 推到 ~0.5；
+- 其余全部保持 exp0.5（含 feet_euler 脚朝向 1.5、base_height 1.0）。
+
+### 3. 修改内容
+
+### 修改一：train.py 支持 OSS checkpoint 续训
+`train.py` 新增 `RESUME_CHECKPOINT_URL`（exp0.5 model_2300 的 OSS 链接），启动时下载并 `ppo_runner.load(..., load_optimizer=False)`，然后从 iter 2300 继续训练到 5300。
+
+**理由**：exp0.5 模型已是接近目标的最优起点，微调比从零训练稳定。
+
+### 修改二：微调 3 个权重
+| 参数 | exp0.5 | exp0.14 |
+| --- | --- | --- |
+| stride_length | 3.0 | 3.2 |
+| step_cycle | 4.0 | 4.2 |
+| phase_offset | 1.5 | 2.0 |
+
+其余（feet_yaw 1.5、base_height 1.0、default_joint_pos 1.0、knee_extension 0.6、swing_symmetry 1.5 等）保持 exp0.5。
+
+### 4. 修改文件
+- `humanoid/scripts/train.py`：OSS resume 下载与加载。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：stride_length/step_cycle/phase_offset 微调。
+- `humanoid/envs/x1/x1_dh_stand_env.py`：恢复 exp0.5 的 feet_euler 脚朝向与 hip_yaw 约束；保留 actual-cycle 相位（exp0.12 引入）。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 续训（exp0.5 model_2300 -> model_5300） |
+| GM 账号 | 待定（新建训练任务时确认） |
+| max_iterations | 3000（从 iter 2300 续到 5300） |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
 
 ### 6. 预期与验收
 | 指标 | 目标 | 异常信号 |

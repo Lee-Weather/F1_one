@@ -643,15 +643,14 @@ class X1DHStandEnv(LeggedRobot):
         return self.foot_phase_rew.sum(dim=1)
 
     def _reward_feet_yaw(self):
-        left_yaw = self.dof_pos[:, 2] + self.dof_pos[:, 5]
-        right_yaw = self.dof_pos[:, 8] + self.dof_pos[:, 11]
-        foot_yaw = torch.stack((left_yaw, right_yaw), dim=1)
+        base_yaw = torch.atan2(2.0 * (self.base_quat[:, 3] * self.base_quat[:, 2] + self.base_quat[:, 0] * self.base_quat[:, 1]), 1.0 - 2.0 * (self.base_quat[:, 1] * self.base_quat[:, 1] + self.base_quat[:, 2] * self.base_quat[:, 2]))
+        yaw_err = wrap_to_pi(self.feet_euler_xyz[:, :, 2] - base_yaw.unsqueeze(1))
         sigma = self.cfg.rewards.foot_yaw_sigma
-        rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.abs(foot_yaw)
+        rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma))
         return rew.sum(dim=1)
 
     def _reward_joint_deviation_hip(self):
-        idx = [i for i, name in enumerate(self.dof_names) if ('hip_roll' in name or 'ankle_roll' in name)]
+        idx = [i for i, name in enumerate(self.dof_names) if ('hip_yaw' in name or 'hip_roll' in name or 'ankle_roll' in name)]
         diff = self.dof_pos[:, idx] - self.default_dof_pos[:, idx]
         return torch.sum(torch.abs(diff), dim=1)
 

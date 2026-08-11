@@ -31,12 +31,26 @@
 # Copyright (c) 2024, AgiBot Inc. All rights reserved.
 
 
+import os
+import urllib.request
+
+from humanoid import LEGGED_GYM_ROOT_DIR
 from humanoid.envs import *
 from humanoid.utils import get_args, task_registry
+
+# Optional OSS checkpoint for fine-tuning from a previous experiment.
+RESUME_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F11%2Fmodel_2300_20260811114745A283.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1787087652&Signature=MB4rKIH77gLE7vwS6XldnV9Ot8U%3D"
 
 def train(args):
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     ppo_runner, train_cfg, log_dir = task_registry.make_alg_runner(env=env, name=args.task, args=args)
+    if RESUME_CHECKPOINT_URL:
+        resume_path = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "resume_model.pt")
+        os.makedirs(os.path.dirname(resume_path), exist_ok=True)
+        print(f"[train] Downloading resume checkpoint from OSS to {resume_path}")
+        urllib.request.urlretrieve(RESUME_CHECKPOINT_URL, resume_path)
+        ppo_runner.load(resume_path, load_optimizer=False)
+        print("[train] Resumed from OSS checkpoint")
     ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=False)
 
 if __name__ == '__main__':
