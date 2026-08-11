@@ -940,7 +940,7 @@ cycle_rew = cycle_rew * band - outside_pen
 - 区间外惩罚改为“起脚事件时稀疏惩罚”，不再在每个物理步扣分；
 - `feet_air_time` 回到 3.0、`stride_length_min` 回到 0.20，避免过度激进；
 - 保留 exp0.9 中正确的方向：`joint_deviation_hip` 去掉 hip_yaw、`feet_yaw=4.5`。
-| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚+回退 air_time/步长门槛；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚+回退 air_time/步长门槛；训练中 | 训练中 | TASK_20260811_270 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.10：周期区间外稀疏事件惩罚 + 回退 air_time/步长门槛
@@ -988,7 +988,7 @@ self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew - outside_pen, torch.ze
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零 |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | repefi7583@candaba.com |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
