@@ -1039,7 +1039,7 @@ self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew - outside_pen, torch.ze
 - 完全回退 exp0.8~0.10 的周期奖励与 hip_yaw 改动，恢复 exp0.5 的稳定配置；
 - 基于 exp0.3（周期/步频/步长/抬脚全达标）与 exp0.5（高度/脚朝向/速度达标）的证据，做小幅微调；
 - 放宽 default_joint_pos/knee_extension/joint_deviation_legs 等过强约束，只小幅提高 stride_length 与 phase_offset。
-| exp0.11 | 2026-08-11 | 回退 exp0.5 配置，放宽约束并小幅推步长/相位；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+| exp0.11 | 2026-08-11 | 回退 exp0.5 配置，放宽约束并小幅推步长/相位；训练中 | 训练中 | TASK_20260811_282 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.11：恢复 exp0.5 均衡配置 + 放宽约束 + 小幅推步长/相位
@@ -1103,7 +1103,7 @@ cycle_rew = torch.clamp(cycle_time / self.cycle_target, 0.0, 1.0) * torch.clamp(
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零 |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | repefi7583@candaba.com |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
