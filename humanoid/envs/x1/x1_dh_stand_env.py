@@ -449,6 +449,7 @@ class X1DHStandEnv(LeggedRobot):
         self.max_stride_dist[env_ids] = 0.
         self.foot_stride_dense_rew[env_ids] = 0.
         self.last_swing_duration[env_ids] = 0.
+        self.last_cycle_time[env_ids] = 0.
         self.swing_symmetry_rew[env_ids] = 0.
         self.foot_phase_rew[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
@@ -506,6 +507,7 @@ class X1DHStandEnv(LeggedRobot):
         self.max_stride_dist = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.foot_stride_dense_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.last_swing_duration = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
+        self.last_cycle_time = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.swing_symmetry_rew = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self.foot_phase_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
 
@@ -536,12 +538,14 @@ class X1DHStandEnv(LeggedRobot):
 
         other_start = torch.stack((self.last_swing_start_time[:, 1], self.last_swing_start_time[:, 0]), dim=1)
         time_since_other = (episode_steps - other_start) * self.dt
-        expected_phase = self.cycle_target * 0.5
+        expected_phase = 0.5 * self.last_cycle_time
         phase_err = torch.square(time_since_other - expected_phase)
         phase_sigma = self.cfg.rewards.phase_offset_sigma
         phase_rew = torch.exp(-phase_err / (2.0 * phase_sigma * phase_sigma))
         phase_valid = onset & (other_start >= 0.0)
         self.foot_phase_rew = torch.where(phase_valid, phase_rew, torch.zeros_like(phase_rew))
+
+        self.last_cycle_time = torch.where(onset, cycle_time, self.last_cycle_time)
 
         new_time = torch.where(onset, episode_steps, self.last_swing_start_time)
         new_pos = torch.where(onset.unsqueeze(-1), self.rigid_state[:, self.feet_indices, :3], self.last_swing_start_pos)
@@ -642,7 +646,7 @@ class X1DHStandEnv(LeggedRobot):
         base_yaw = torch.atan2(2.0 * (self.base_quat[:, 3] * self.base_quat[:, 2] + self.base_quat[:, 0] * self.base_quat[:, 1]), 1.0 - 2.0 * (self.base_quat[:, 1] * self.base_quat[:, 1] + self.base_quat[:, 2] * self.base_quat[:, 2]))
         yaw_err = wrap_to_pi(self.feet_euler_xyz[:, :, 2] - base_yaw.unsqueeze(1))
         sigma = self.cfg.rewards.foot_yaw_sigma
-        rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma))
+        rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma)) - 0.5 * torch.abs(yaw_err)
         return rew.sum(dim=1)
 
     def _reward_joint_deviation_hip(self):
