@@ -24,7 +24,7 @@ from humanoid.utils import get_args, export_policy_as_jit, task_registry, Logger
 from isaacgym.torch_utils import *
 
 # Fallback: download checkpoint from OSS if not found locally
-FALLBACK_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F11%2Fmodel_2300_20260811114745A283.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1787025121&Signature=pbRdHO7UBmvwN0Kk50ZgoU0U4aw%3D"
+FALLBACK_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F11%2Fmodel_3000_20260811131110A738.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1787030021&Signature=48OgtIO1V%2B7UxqgEXOuNM6TTfaQ%3D"
 
 
 def find_checkpoint():
@@ -67,7 +67,7 @@ def find_checkpoint():
     print("[play_gm] No local checkpoint found, downloading from OSS...")
     download_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "x1_dh_stand", "gm_play")
     os.makedirs(download_dir, exist_ok=True)
-    download_path = os.path.join(download_dir, "model_2300.pt")
+    download_path = os.path.join(download_dir, "model_3000.pt")
     try:
         result = subprocess.run(
             ["curl", "-L", "-o", download_path, FALLBACK_CHECKPOINT_URL],
