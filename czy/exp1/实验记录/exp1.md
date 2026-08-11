@@ -1259,7 +1259,7 @@ rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma)) - 0.5 * torch.ab
 - `_reward_feet_yaw` 改为直接使用 `dof_pos` 的 hip_yaw+ankle_roll；
 - 奖励整体回到 exp0.3 基底（stride 2.5、feet_height 0.8、feet_clearance 1.0、flight -1.0、tracking 2.0、low_speed 0.5、default_joint_pos 2.0）；
 - 只叠加 base_height 0.8、direct feet_yaw 2.5、actual-cycle phase 1.5。
-| exp0.13 | 2026-08-12 | 回到 exp0.3 步态基底，直接惩罚 hip_yaw+ankle_roll 脚朝向；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+| exp0.13 | 2026-08-12 | 回到 exp0.3 步态基底，直接惩罚 hip_yaw+ankle_roll 脚朝向；训练中 | 训练中 | TASK_20260812_020 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.13：exp0.3 步态基底 + 直接关节脚朝向惩罚
@@ -1316,7 +1316,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零 |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | bipay43147@barumart.com |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
