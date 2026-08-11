@@ -308,6 +308,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         soft_dof_vel_limit = 0.9
         soft_torque_limit = 0.9
         base_height_target = 0.61
+        base_height_sigma = 0.04
         foot_min_dist = 0.2
         foot_max_dist = 1.0
 
@@ -351,10 +352,11 @@ class X1DHStandCfg(LeggedRobotCfg):
             low_speed = 0.5
             track_vel_hard = 0.6
             # base pos
-            default_joint_pos = 2.0
+            default_joint_pos = 3.5
             orientation = 1.
             feet_rotation = 0.3
-            base_height = 0.2
+            base_height = 1.5
+            knee_extension = 1.0
             base_acc = 0.2
             upward = 0.5
             # energy

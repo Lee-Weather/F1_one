@@ -648,7 +648,15 @@ class X1DHStandEnv(LeggedRobot):
         measured_heights = torch.sum(
             self.rigid_state[:, self.feet_indices, 2] * contact, dim=1) / contact_sum
         base_height = self.root_states[:, 2] - (measured_heights - self.cfg.rewards.feet_to_ankle_distance)
-        return torch.exp(-torch.abs(base_height - self.cfg.rewards.base_height_target) * 100)
+        height_sigma = self.cfg.rewards.base_height_sigma
+        return torch.exp(-torch.square(base_height - self.cfg.rewards.base_height_target) / (2.0 * height_sigma * height_sigma))
+
+    def _reward_knee_extension(self):
+        knee_idx = [i for i, name in enumerate(self.dof_names) if 'knee_pitch' in name]
+        knee_pos = self.dof_pos[:, knee_idx]
+        knee_default = self.default_dof_pos[:, knee_idx]
+        diff = torch.square(knee_pos - knee_default).sum(dim=1)
+        return torch.exp(-diff * 2.0)
 
     def _reward_base_acc(self):
         """
