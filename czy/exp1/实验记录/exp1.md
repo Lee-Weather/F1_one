@@ -1155,7 +1155,7 @@ cycle_rew = torch.clamp(cycle_time / self.cycle_target, 0.0, 1.0) * torch.clamp(
 - `feet_yaw` 增加线性负惩罚；
 - 相位奖励改用“本脚最近一个实际周期的一半”作为期望滞后；
 - `default_joint_pos` 回到 exp0.5 的 1.0，并强化 stride/feet_height/clearance/tracking/low_speed。
-| exp0.12 | 2026-08-12 | 脚朝向加线性惩罚+相位按实际周期+强化步长/抬脚/速度；训练中 | 训练中 | TASK_20260812_016 | bipay43147@barumart.com | model_3000.pt |
+| exp0.12 | 2026-08-12 | 脚朝向线性惩罚+实际周期相位；双脚外翻、步频回升至 2.0，未达标 | 失败 | TASK_20260812_016 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.12：脚朝向线性惩罚 + 实际周期相位 + 强化步长/抬脚/速度
@@ -1210,6 +1210,113 @@ rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma)) - 0.5 * torch.ab
 | --- | --- |
 | 训练方式 | 从零 |
 | GM 账号 | bipay43147@barumart.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务：TASK_20260812_016，2026-08-12 02:19:07 -> 03:23:28 完成 3000 轮，checkpoint model_3000.pt。
+> 回放任务：TASK_20260812_017，2026-08-12 03:42:43 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.11 | exp0.12 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.606m | 0.600m | ~0.61m | ⚠️ |
+| 高于 0.60m 占比 | 71.4% | 52.0% | 高 | ⚠️ |
+| 左/右膝均值 | 0.366/0.574 | 0.447/0.531 rad | 接近默认 | ⚠️ |
+| 脚朝向代理 | +0.293/+1.397 | -1.190/+1.006 rad | ≈0 | ❌ 双脚外翻 |
+| 左/右步频 | 1.80/1.75 | 2.00/2.00 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.555/0.571s | 0.500/0.500s | 0.55~0.85s | ❌ |
+| 估算步长 | 0.191m | 0.176m | >=0.30m | ❌ |
+| 左右摆腿时间 | 0.064/0.449s | 0.194/0.232s | 对称 | ✅ 改善 |
+| 抬脚高度 | 0.024/0.023m | 0.007/0.027m | >=0.03m | ❌ |
+| 相位偏移 | 0.684 | 0.580 | ~0.5 | ⚠️ 改善 |
+| 平均速度 | 0.339 m/s | 0.352 m/s | ≈0.5 | ❌ |
+
+**结论**：❌ 未达标（左右摆腿对称性和相位改善，但双脚外翻 -1.19/+1.01、步频 2.00、步长 0.176m、抬脚不足）。
+**根因分析**：
+- `feet_euler` 奖励与我们实测的 `hip_yaw+ankle_roll` 代理不一致，线性惩罚没有作用到实际外撇关节；
+- 强化 feet_height/stride/tracking 后步频又回升到 2.0，说明这些权重与周期目标冲突；
+- 需要直接惩罚 `hip_yaw+ankle_roll` 关节量，并把其他权重退回 exp0.3 的“步态全达标”基底。
+**下一步方向**：
+- `_reward_feet_yaw` 改为直接使用 `dof_pos` 的 hip_yaw+ankle_roll；
+- 奖励整体回到 exp0.3 基底（stride 2.5、feet_height 0.8、feet_clearance 1.0、flight -1.0、tracking 2.0、low_speed 0.5、default_joint_pos 2.0）；
+- 只叠加 base_height 0.8、direct feet_yaw 2.5、actual-cycle phase 1.5。
+| exp0.13 | 2026-08-12 | 回到 exp0.3 步态基底，直接惩罚 hip_yaw+ankle_roll 脚朝向；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+
+
+## 实验 exp0.13：exp0.3 步态基底 + 直接关节脚朝向惩罚
+
+### 1. 上一实验结果与教训
+> exp0.12：双脚外翻 -1.190/+1.006 rad、步频 2.00、步长 0.176m，未达标。
+>
+> **核心教训**：`feet_euler` 奖励与实测 `hip_yaw+ankle_roll` 代理不一致，奖励调不到实际外撇关节；同时强化步长/抬脚/速度会重新把步频推高，说明应该回到 exp0.3 已验证的步态基底，再只叠加少量目标约束。
+
+### 2. 本轮修改目标
+- 奖励整体回到 exp0.3 的“周期/步频/步长/抬脚全达标”基底；
+- `_reward_feet_yaw` 改为直接惩罚 `hip_yaw+ankle_roll` 关节量，目标 ≈0；
+- 只叠加 base_height 0.8 与 actual-cycle phase 1.5，期望高度 ~0.61、相位 ~0.5 而不破坏步态。
+
+### 3. 修改内容
+
+### 修改一：直接关节脚朝向惩罚
+`_reward_feet_yaw` 不再用 `feet_euler`，改为：
+```python
+left_yaw = self.dof_pos[:, 2] + self.dof_pos[:, 5]
+right_yaw = self.dof_pos[:, 8] + self.dof_pos[:, 11]
+foot_yaw = torch.stack((left_yaw, right_yaw), dim=1)
+rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.abs(foot_yaw)
+```
+`feet_yaw` 权重 2.5。`_reward_joint_deviation_hip` 去掉 hip_yaw，避免与 0 目标冲突。
+
+**理由**：实测指标就是 `hip_yaw+ankle_roll`，直接优化该量才能修好外撇。
+
+### 修改二：回到 exp0.3 步态基底
+| 参数 | exp0.12 | exp0.13 | 说明 |
+| --- | --- | --- | --- |
+| stride_length | 4.0 | 2.5 | exp0.3 达标值 |
+| feet_height | 1.2 | 0.8 | exp0.3 达标值 |
+| feet_clearance | 1.5 | 1.0 | exp0.3 达标值 |
+| flight_penalty | -2.0 | -1.0 | exp0.3 达标值 |
+| tracking_lin_vel | 2.5 | 2.0 | exp0.3 达标值 |
+| low_speed | 0.8 | 0.5 | exp0.3 达标值 |
+| default_joint_pos | 1.0 | 2.0 | exp0.3 达标值 |
+| swing_symmetry | 2.0 | 1.5 | 减小干扰 |
+
+### 修改三：只保留少量目标约束
+| 参数 | 值 |
+| --- | --- |
+| base_height | 0.8（exp0.3 为 0.2，为高度目标折中） |
+| phase_offset | 1.5（actual-cycle 相位） |
+| phase_offset_sigma | 0.08 |
+| feet_yaw | 2.5（direct joint 惩罚） |
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_env.py`：`_reward_feet_yaw` 改为 dof_pos 关节代理；`_reward_joint_deviation_hip` 去掉 hip_yaw。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：按上表调整权重。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | 待定（新建训练任务时确认） |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
