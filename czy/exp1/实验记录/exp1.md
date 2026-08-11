@@ -838,7 +838,7 @@ cycle_rew = cycle_rew * ((cycle_time >= self.cycle_target - cycle_window) & (cyc
 - 周期奖励改为“区间内奖励 + 区间外负惩罚”，让过快的 0.51s 循环直接亏分；
 - `joint_deviation_hip` 去掉 hip_yaw，只约束 hip_roll/ankle_roll，把脚朝向完全交给 `feet_yaw`；
 - 提高 `stride_length_min` 与 `stride_length` 权重，抬高迈步门槛。
-| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；训练中 | 训练中 | TASK_20260811_250 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.9：周期区间外惩罚 + 解除 hip_yaw 约束 + 抬高步长门槛
@@ -889,7 +889,7 @@ cycle_rew = cycle_rew * band - outside_pen
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零 |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | repefi7583@candaba.com |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
