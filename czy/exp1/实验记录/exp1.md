@@ -1,5 +1,12 @@
 # Exp1 实验笔记
 
+## 当前进度
+
+- 目标：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
+- 当前状态：exp0.15 训练中（从 exp0.5 model_2300 低学习率续训）；exp0.3 曾全部达标步态类指标但高度/脚朝向/相位不达标，exp0.5 最接近全达标。
+- 实验产物按规范只保留 `czy/data/{实验名}/` 下的 pt/mp4/csv 三个文件。
+
+
 ## 实验索引
 
 | 编号 | 日期 | 摘要 | 状态 | Task ID | GM账号 | checkpoint |
@@ -599,7 +606,22 @@
 - 新增 `swing_symmetry` / `phase_offset`；
 - `stand_still` 增加速度惩罚。
 
-### 4. 训练结果
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_config.py`：新增 joint_deviation_hip/joint_deviation_legs/feet_yaw/swing_symmetry/phase_offset 权重，stand_still 增加速度惩罚。
+- `humanoid/envs/x1/x1_dh_stand_env.py`：新增对应奖励函数。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM账号 | memokaf419@barumart.com |
+| max_iterations | 3000（2311 轮因账号余额终止） |
+| 算力 | ESKU000001, BJX00000001/V000021 |
+
+### 6. 预期与验收
+- 修复脚不朝前；保持高度；改善左右对称。
+
+### 7. 实验结果
 
 > TASK_20260811_052 在 2311 轮因账号余额终止，最后保存 model_2300.pt。
 > 回放任务 TASK_20260811_079。
@@ -646,7 +668,21 @@
 | swing_symmetry_sigma | 0.08 | 0.05 |
 | phase_offset_sigma | 0.10 | 0.08 |
 
-### 4. 训练结果
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_config.py`：提高 step_cycle/stride_length/swing_symmetry/phase_offset 权重，收窄 cycle_window 与 sigma。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM账号 | repefi7583@candaba.com |
+| max_iterations | 3000 |
+| 算力 | ESKU000001, BJX00000001/V000021 |
+
+### 6. 预期与验收
+- 通过强化周期/步长/对称权重补齐 exp0.5 的差距。
+
+### 7. 实验结果
 
 > TASK_20260811_085 完成 3000 轮。
 > 回放任务 TASK_20260811_093。
@@ -702,7 +738,21 @@
 | joint_deviation_hip | -0.5 | -0.5 | -0.5 |
 | flight_penalty | -2.0 | -2.0 | -2.0 |
 
-### 4. 训练结果
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_config.py`：回退 exp0.5 权重，stride_length 3.0->3.5、swing_symmetry 1.5->2.0，其余保持 exp0.5。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM账号 | repefi7583@candaba.com |
+| max_iterations | 3000 |
+| 算力 | ESKU000001, BJX00000001/V000021 |
+
+### 6. 预期与验收
+- 回到 exp0.5 权重风格，小幅强化步长与对称，期望补齐步长与对称差距。
+
+### 7. 实验结果
 > 训练任务：TASK_20260811_100（x1-noref-cyc-v11），2026-08-11 13:38:13 -> 14:47:26 完成 3000 轮，checkpoint model_3000.pt。
 > 回放任务：TASK_20260811_184，2026-08-11 16:02:13 完成，输出 CSV 与 MP4。
 
@@ -731,7 +781,7 @@
 - `swing_symmetry` 回到 1.5 附近，避免把“对称”优化成高频同相小碎步。
 - 适当降低 `base_height` 权重，减少“高频小碎步更稳”的诱导，把奖励预算让给步长与抬脚。
 
-### 5. 数据归档
+#### 数据归档
 - czy/data/exp0_7/：model_3000.pt、play_output.mp4、isaac_diag.csv（仅 3 个文件）。
 
 
