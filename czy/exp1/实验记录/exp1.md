@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：exp0.15 未达标；下一步 exp0.16 从零训练 exp0.3 步态基底 + 少量目标约束。
+> **当前状态**：exp0.16 训练中（从零训练 exp0.3 步态基底 + 少量目标约束）。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -1591,7 +1591,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 - 从零训练，使用 exp0.3 已验证的步态基底（stride 2.5、step_cycle 4.0、air 3.0、feet_height 0.8、clearance 1.0、flight -1.0、default_joint_pos 2.0）；
 - 只叠加 base_height 1.0、feet_yaw 1.5、swing_symmetry 1.5、phase_offset 1.5，去掉 knee_extension/joint_deviation 等额外约束；
 - 期望步态保持达标的同时把高度/脚朝向/相位带进目标。
-| exp0.16 | 2026-08-12 | 从零训练 exp0.3 步态基底+少量目标约束；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+| exp0.16 | 2026-08-12 | 从零训练 exp0.3 步态基底+少量目标约束；训练中 | 训练中 | TASK_20260812_034 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.16：exp0.3 步态基底 + 少量目标约束（从零训练）
@@ -1644,7 +1644,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零 |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | bipay43147@barumart.com |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
