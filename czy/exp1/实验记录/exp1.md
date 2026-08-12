@@ -1454,7 +1454,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 **下一步方向**：
 - 从 exp0.5 model_2300 再次续训，学习率降到 1e-4、只跑 1500 轮；
 - 保留 stride 3.2 / step_cycle 4.2 / phase_offset 2.0（actual-cycle）的小幅微调。
-| exp0.15 | 2026-08-12 | 从 exp0.5 model_2300 低学习率 1e-4 续训 1500 轮；待训练 | 待训练 | TASK_TBD | 待定 | model_3800.pt |
+| exp0.15 | 2026-08-12 | 从 exp0.5 model_2300 低学习率 1e-4 续训 1500 轮；训练中 | 训练中 | TASK_20260812_025 | bipay43147@barumart.com | model_3800.pt |
 
 
 ## 实验 exp0.15：exp0.5 低学习率续训微调
@@ -1495,7 +1495,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 续训（exp0.5 model_2300 -> model_3800） |
-| GM 账号 | 待定（新建训练任务时确认） |
+| GM 账号 | bipay43147@barumart.com |
 | max_iterations | 1500 |
 | save_interval | 100 |
 | num_envs | 4096 |
