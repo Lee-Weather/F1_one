@@ -650,7 +650,7 @@ class X1DHStandEnv(LeggedRobot):
         return rew.sum(dim=1)
 
     def _reward_joint_deviation_hip(self):
-        idx = [i for i, name in enumerate(self.dof_names) if ('hip_yaw' in name or 'hip_roll' in name or 'ankle_roll' in name)]
+        idx = [i for i, name in enumerate(self.dof_names) if ('hip_roll' in name or 'ankle_roll' in name)]
         diff = self.dof_pos[:, idx] - self.default_dof_pos[:, idx]
         return torch.sum(torch.abs(diff), dim=1)
 
@@ -677,13 +677,14 @@ class X1DHStandEnv(LeggedRobot):
 
     def _reward_default_joint_pos(self):
         """
-        Calculates the reward for keeping joint positions close to default positions, with a focus 
-        on penalizing deviation in yaw and roll directions. Excludes yaw and roll from the main penalty.
+        Calculates the reward for keeping joint positions close to default positions, with a focus
+        on penalizing deviation in roll directions. Excludes hip_yaw to avoid conflict with feet_yaw reward.
         """
         joint_diff = self.dof_pos - self.default_joint_pd_target
-        left_yaw_roll = joint_diff[:, [1,2,5]]
-        right_yaw_roll = joint_diff[:, [7,8,11]]
-        yaw_roll = torch.norm(left_yaw_roll, dim=1) + torch.norm(right_yaw_roll, dim=1)
+        # Only penalize hip_roll and ankle_roll deviation (NOT hip_yaw - let feet_yaw reward handle it)
+        left_roll = joint_diff[:, [1,5]]
+        right_roll = joint_diff[:, [7,11]]
+        yaw_roll = torch.norm(left_roll, dim=1) + torch.norm(right_roll, dim=1)
         yaw_roll = torch.clamp(yaw_roll - 0.1, 0, 50)
         return torch.exp(-yaw_roll * 100) - 0.01 * torch.norm(joint_diff, dim=1)
 

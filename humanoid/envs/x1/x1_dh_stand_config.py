@@ -363,7 +363,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             knee_extension = 0.6
             joint_deviation_hip = -0.5
             joint_deviation_legs = -0.05
-            feet_yaw = 1.5
+            feet_yaw = 2.0
             swing_symmetry = 1.5
             phase_offset = 2.0
             base_acc = 0.2

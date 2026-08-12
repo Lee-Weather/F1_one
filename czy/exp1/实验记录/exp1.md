@@ -1691,7 +1691,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 **下一步方向**：
 - exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
 | exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；两次任务均排队卡住未启动，弃用 | 已废弃 | TASK_20260812_127/146 | bipay43147@barumart.com | - |
-| exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），从零训练补齐步长/步频/相位 | 训练中 | TASK_20260812_167 | bipay43147@barumart.com | model_3000.pt |
+| exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），从零训练补齐步长/步频/相位 | 训练中 | TASK_20260812_180 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
