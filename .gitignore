@@ -66,3 +66,6 @@ MUJOCO_LOG.TXT
 .obsidian/
 
 czy/data/
+
+# GM CLI temp task payloads
+create-*.json
