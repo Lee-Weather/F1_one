@@ -18,6 +18,13 @@
 | exp0.6 | 2026-08-11 | 强化周期/步长/对称奖励；训练完成但步态更不对称，未达标 | 失败 | TASK_20260811_085 | repefi7583@candaba.com | model_3000.pt |
 | exp0.7 | 2026-08-11 | 回退 exp0.5 权重并小幅强化步长/对称；高度与相位达标，但步频过高、步长与抬脚不足，小碎步未改善 | 失败 | TASK_20260811_100 | repefi7583@candaba.com | model_3000.pt |
 | exp0.8 | 2026-08-11 | 周期硬区间+强化抬脚；抬脚达标但周期仍 0.51s、步长倒退、右脚外撇，未达标 | 失败 | TASK_20260811_231 | repefi7583@candaba.com | model_3000.pt |
+| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；训练崩坏，跳跃后退，未达标 | 失败 | TASK_20260811_250 | repefi7583@candaba.com | model_3000.pt |
+| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚；hip_yaw 失控、周期 0.36s、步长 0.097m，未达标 | 失败 | TASK_20260811_270 | repefi7583@candaba.com | model_3000.pt |
+| exp0.11 | 2026-08-11 | 回退 exp0.5 配置并放宽约束；周期/步频达标，但步长/抬脚/脚朝向/相位未达标 | 失败 | TASK_20260812_002 | bipay43147@barumart.com | model_3000.pt |
+| exp0.12 | 2026-08-12 | 脚朝向线性惩罚+实际周期相位；双脚外翻、步频回升至 2.0，未达标 | 失败 | TASK_20260812_016 | bipay43147@barumart.com | model_3000.pt |
+| exp0.13 | 2026-08-12 | exp0.3 基底+直接关节脚朝向；脚朝向达标但步频 3.05、步长 0.165m，未达标 | 失败 | TASK_20260812_020 | bipay43147@barumart.com | model_3000.pt |
+| exp0.14 | 2026-08-12 | 从 exp0.5 model_2300 续训；高学习率导致步态漂移（步频 3.35），未达标 | 失败 | TASK_20260812_023 | bipay43147@barumart.com | model_5300.pt |
+| exp0.15 | 2026-08-12 | 从 exp0.5 model_2300 低学习率 1e-4 续训 1500 轮；回放中 | 回放中 | TASK_20260812_025 | bipay43147@barumart.com | model_3800.pt |
 
 ## 实验 exp0：无参考轨迹 3000 轮基线
 
@@ -886,7 +893,6 @@ cycle_rew = cycle_rew * ((cycle_time >= self.cycle_target - cycle_window) & (cyc
 - 周期奖励改为“区间内奖励 + 区间外负惩罚”，让过快的 0.51s 循环直接亏分；
 - `joint_deviation_hip` 去掉 hip_yaw，只约束 hip_roll/ankle_roll，把脚朝向完全交给 `feet_yaw`；
 - 提高 `stride_length_min` 与 `stride_length` 权重，抬高迈步门槛。
-| exp0.9 | 2026-08-11 | 周期区间外惩罚+解除 hip_yaw 约束+抬高步长门槛；训练崩坏，跳跃后退，未达标 | 失败 | TASK_20260811_250 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.9：周期区间外惩罚 + 解除 hip_yaw 约束 + 抬高步长门槛
@@ -988,7 +994,6 @@ cycle_rew = cycle_rew * band - outside_pen
 - 区间外惩罚改为“起脚事件时稀疏惩罚”，不再在每个物理步扣分；
 - `feet_air_time` 回到 3.0、`stride_length_min` 回到 0.20，避免过度激进；
 - 保留 exp0.9 中正确的方向：`joint_deviation_hip` 去掉 hip_yaw、`feet_yaw=4.5`。
-| exp0.10 | 2026-08-11 | 周期区间外稀疏事件惩罚；hip_yaw 失控、周期 0.36s、步长 0.097m，未达标 | 失败 | TASK_20260811_270 | repefi7583@candaba.com | model_3000.pt |
 
 
 ## 实验 exp0.10：周期区间外稀疏事件惩罚 + 回退 air_time/步长门槛
@@ -1087,7 +1092,6 @@ self.foot_cycle_rew = torch.where(valid_cycle, cycle_rew - outside_pen, torch.ze
 - 完全回退 exp0.8~0.10 的周期奖励与 hip_yaw 改动，恢复 exp0.5 的稳定配置；
 - 基于 exp0.3（周期/步频/步长/抬脚全达标）与 exp0.5（高度/脚朝向/速度达标）的证据，做小幅微调；
 - 放宽 default_joint_pos/knee_extension/joint_deviation_legs 等过强约束，只小幅提高 stride_length 与 phase_offset。
-| exp0.11 | 2026-08-11 | 回退 exp0.5 配置并放宽约束；周期/步频达标，但步长/抬脚/脚朝向/相位未达标 | 失败 | TASK_20260812_002 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.11：恢复 exp0.5 均衡配置 + 放宽约束 + 小幅推步长/相位
@@ -1203,7 +1207,6 @@ cycle_rew = torch.clamp(cycle_time / self.cycle_target, 0.0, 1.0) * torch.clamp(
 - `feet_yaw` 增加线性负惩罚；
 - 相位奖励改用“本脚最近一个实际周期的一半”作为期望滞后；
 - `default_joint_pos` 回到 exp0.5 的 1.0，并强化 stride/feet_height/clearance/tracking/low_speed。
-| exp0.12 | 2026-08-12 | 脚朝向线性惩罚+实际周期相位；双脚外翻、步频回升至 2.0，未达标 | 失败 | TASK_20260812_016 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.12：脚朝向线性惩罚 + 实际周期相位 + 强化步长/抬脚/速度
@@ -1307,7 +1310,6 @@ rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma)) - 0.5 * torch.ab
 - `_reward_feet_yaw` 改为直接使用 `dof_pos` 的 hip_yaw+ankle_roll；
 - 奖励整体回到 exp0.3 基底（stride 2.5、feet_height 0.8、feet_clearance 1.0、flight -1.0、tracking 2.0、low_speed 0.5、default_joint_pos 2.0）；
 - 只叠加 base_height 0.8、direct feet_yaw 2.5、actual-cycle phase 1.5。
-| exp0.13 | 2026-08-12 | exp0.3 基底+直接关节脚朝向；脚朝向达标但步频 3.05、步长 0.165m，未达标 | 失败 | TASK_20260812_020 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.13：exp0.3 步态基底 + 直接关节脚朝向惩罚
@@ -1412,7 +1414,6 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 **下一步方向**：
 - 从 exp0.5（最接近达标：高度 0.603、脚朝向 -0.21/-0.02、速度 0.512、步长 0.298）的 `model_2300.pt` 续训，而不是从零训练；
 - 只小幅调整 stride_length 3.0→3.2、step_cycle 4.0→4.2、phase_offset 2.0（actual-cycle），其余保持 exp0.5。
-| exp0.14 | 2026-08-12 | 从 exp0.5 model_2300 续训；高学习率导致步态漂移（步频 3.35），未达标 | 失败 | TASK_20260812_023 | bipay43147@barumart.com | model_5300.pt |
 
 
 ## 实验 exp0.14：从 exp0.5 model_2300 续训微调
@@ -1502,7 +1503,6 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 **下一步方向**：
 - 从 exp0.5 model_2300 再次续训，学习率降到 1e-4、只跑 1500 轮；
 - 保留 stride 3.2 / step_cycle 4.2 / phase_offset 2.0（actual-cycle）的小幅微调。
-| exp0.15 | 2026-08-12 | 从 exp0.5 model_2300 低学习率 1e-4 续训 1500 轮；回放中 | 回放中 | TASK_20260812_025 | bipay43147@barumart.com | model_3800.pt |
 
 
 ## 实验 exp0.15：exp0.5 低学习率续训微调
