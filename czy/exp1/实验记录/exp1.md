@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：exp0.19 训练完成（model_2000），待 play 回放验证 CSV 指标。所有 GM 账号余额耗尽，阻塞中。
+> **当前状态**：exp0.19 CSV 已分析（不达标），exp0.20 已提交训练（hip_yaw 约束到 0）。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -1692,7 +1692,8 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 - exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
 | exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；两次任务均排队卡住未启动，弃用 | 已废弃 | TASK_20260812_127/146 | bipay43147@barumart.com | - |
 | exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），任务 3 次排队卡住未启动，弃用转 exp0.19 | 已废弃 | TASK_20260812_167/180 | bipay43147@barumart.com | - |
-| exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 训练完成/待回放 | TASK_20260812_182 | bipay43147@barumart.com | model_2000.pt |
+| exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 失败（hip_yaw 漂移失控，CSV 已分析） | TASK_20260812_182 | bipay43147@barumart.com | model_2000.pt |
+| exp0.20 | 2026-08-12 | hip_yaw 目标改为 0 约束（default_joint_pos/joint_deviation_hip 重新纳入 hip_yaw，目标 0），其余保持 exp0.19 | 训练中 | TASK_20260812_256 | limxmspwo8w3969eot@emalupe.com | - |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
@@ -1961,14 +1962,105 @@ expected_phase = self.cycle_target * 0.5
 
 #### 7.3 分析与结论
 
-1. **foot yaw 修复确认有效**：feet_yaw reward 从 exp0.5 的 ~0.5 提升到 1.8（+260%），证明从 `_reward_default_joint_pos` 和 `_reward_joint_deviation_hip` 中移除 hip_yaw 惩罚是正确的。
-2. **稳定性极好**：episode_length 达到 97.5%，几乎不摔。
-3. **待确认指标**：因所有 6 个 GM 账号余额耗尽（各 $50，共 $300），无法提交 play 回放任务获取 CSV，以下指标无法精确量化：
-   - 步长（stride_length reward 偏低，可能 < 0.30m）
-   - 抬脚高度（feet_clearance 中等）
-   - 脚朝向（feet_yaw reward 高，预计接近 0）
-   - 相位偏移（稀疏 reward，需 CSV 确认）
+1. **foot yaw 修复确认有效（训练侧）**：feet_yaw reward 从 exp0.5 的 ~0.5 提升到 1.8（+260%），证明从 `_reward_default_joint_pos` 和 `_reward_joint_deviation_hip` 中移除 hip_yaw 惩罚在训练期间有效。
+2. **但 hip_yaw 失控导致步态退化（回放侧）**：play CSV 实测（TASK_20260812_254）显示 hip_yaw 关节漂移到 1.42/1.45 rad（极限 ±1.5），步态全面恶化：
+   - 平均速度 0.344 m/s（目标 0.5）❌
+   - 周期 0.533s（目标 0.55~0.85s）❌，步频 1.875（目标 1.2~1.8）❌
+   - 步长 0.183m（目标 >=0.30m）❌
+   - 抬脚 0.013/0.045m（目标 >=0.03m）❌/✅（左腿不足）
+   - 相位偏移 0.188（目标 ~0.5）❌
+   - 机身高度 0.596m（目标 ~0.61m）✅
+3. **根因**：完全移除 hip_yaw 惩罚后，策略让 hip_yaw 逼近关节极限（1.42 rad ≈ 81°），说明移除约束"矫枉过正"，需要一个**目标为 0 的 hip_yaw 约束**（既非 default ∓0.31 外八字，也非完全自由）。
 
-#### 7.4 阻塞状态
+#### 7.4 下一步（exp0.20）
 
-> **所有 6 个 GM-CLI 账号余额已耗尽**（peleha7269, yijed24226, jevid17601, memokaf419, repefi7583, bipay43147），无法提交 play 回放或新一轮训练任务。需用户新增账号或充值后方可继续。
+- `_reward_default_joint_pos`：hip_yaw 偏差目标改为 0（`joint_diff[:, [2,8]] = dof_pos[:, [2,8]]`），重新纳入 roll 组惩罚
+- `_reward_joint_deviation_hip`：hip_yaw 以目标 0 重新加入
+- 其余保持 exp0.19 配置（feet_yaw 2.0 / stride 3.2 / step_cycle 4.2 / phase 2.0）
+- 新注册 5 个 GM 账号（limxmspw*@emalupe.com），解除余额阻塞
+
+---
+
+## 实验 exp0.20：hip_yaw 目标 0 约束——修复 exp0.19 漂移
+
+### 1. 上一实验结果与教训
+
+> 数据：exp0.19 play `isaac_diag.csv` 分析结果（TASK_20260812_254）。
+>
+> | 指标 | exp0.19 实测 | 目标 | 判定 |
+> | --- | --- | --- | --- |
+> | 机身高度 | 0.596m | ~0.61m | ✅ |
+> | 平均速度 | 0.344 m/s | ≈0.5 | ❌ |
+> | 左/右周期 | 0.533/0.533s | 0.55~0.85s | ❌ |
+> | 左/右步频 | 1.875/1.875 | 1.2~1.8 | ❌ |
+> | 左/右步长 | 0.183/0.183m | >=0.30m | ❌ |
+> | 左/右抬脚 | 0.013/0.045m | >=0.03m | ❌/✅ |
+> | 左/右脚朝向(hip_yaw) | 1.423/1.448 rad | ≈0 | ❌ |
+> | 相位偏移 | 0.188 | ~0.5 | ❌ |
+>
+> **核心教训**：完全移除 hip_yaw 惩罚（exp0.19）导致 hip_yaw 漂移到 1.42 rad（极限 ±1.5），策略"贪"到关节极限，步态全面退化。说明 hip_yaw 需要约束，但约束目标应是 **0**（脚朝向直行）而非 default ∓0.31（外八字），否则与 feet_yaw 冲突（exp0.5 左脚朝向 -0.254 根因）。
+
+### 2. 本轮修改目标
+
+- `_reward_default_joint_pos`：hip_yaw 重新纳入 roll 组，但偏差目标改为 0
+- `_reward_joint_deviation_hip`：hip_yaw 以目标 0 重新加入
+- 其余保持 exp0.19 配置（feet_yaw 2.0 / stride 3.2 / step_cycle 4.2 / phase 2.0）
+- 期望修复 hip_yaw 漂移，恢复 exp0.5 步态水平，脚朝向趋于 0
+
+### 3. 修改内容
+
+### 修改一：default_joint_pos hip_yaw 目标 0
+
+```python
+# 旧（exp0.19）：left_roll = joint_diff[:, [1,5]]  # 仅 hip_roll, ankle_roll
+# 新（exp0.20）：joint_diff[:, [2,8]] = dof_pos[:, [2,8]]  # hip_yaw 目标 0
+#               left_roll = joint_diff[:, [1,2,5]]  # hip_roll, hip_yaw, ankle_roll
+```
+
+**理由**：hip_yaw 以 0 为目标（脚朝向直行），既防止漂移到极限，又不与外八字 default 冲突。
+
+### 修改二：joint_deviation_hip hip_yaw 目标 0
+
+```python
+# 旧（exp0.19）：idx = [hip_roll, ankle_roll]（不含 hip_yaw）
+# 新（exp0.20）：hip_roll/ankle_roll 对 default，hip_yaw 对 0（追加 concat）
+```
+
+**理由**：同上，hip_yaw 线性惩罚目标改为 0。
+
+### 4. 修改文件
+
+- `humanoid/envs/x1/x1_dh_stand_env.py`：`_reward_default_joint_pos`、`_reward_joint_deviation_hip`。
+
+### 5. 训练参数
+
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | limxmspwo8w3969eot@emalupe.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+
+### 6. 预期与验收
+
+| 指标 | exp0.5 实测 | 本轮目标 | 异常信号 |
+| --- | --- | --- | --- |
+| 机身高度 | 0.603m | ~0.61m | < 0.58m |
+| 相位偏移 | 0.352 | ~0.5 | < 0.35 |
+| 左/右步频 | 1.68/1.67 | 1.2~1.8 | > 1.9 |
+| 左/右周期 | 0.594/0.599s | 0.55~0.85s | < 0.55s |
+| 左/右步长 | 0.312/0.314m | >=0.30m | < 0.25m |
+| 左/右抬脚 | 0.033/0.026m | >=0.03m | < 0.02m |
+| 左/右脚朝向 | -0.254/0.066 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | 0.525 m/s | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+
+> 待训练完成（TASK_20260812_256）后回放填表。

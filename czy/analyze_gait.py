@@ -2,7 +2,6 @@
 import sys
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
 
 def analyze_gait(csv_path):
     df = pd.read_csv(csv_path)
