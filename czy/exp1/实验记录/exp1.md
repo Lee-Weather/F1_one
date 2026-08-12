@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：exp0.16 训练完成，回放中（GM API 暂时网络不可达，待恢复后取 CSV）。
+> **当前状态**：exp0.16 未达标；exp0.17 将相位期望改回固定值验证步频回落。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -1591,7 +1591,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 - 从零训练，使用 exp0.3 已验证的步态基底（stride 2.5、step_cycle 4.0、air 3.0、feet_height 0.8、clearance 1.0、flight -1.0、default_joint_pos 2.0）；
 - 只叠加 base_height 1.0、feet_yaw 1.5、swing_symmetry 1.5、phase_offset 1.5，去掉 knee_extension/joint_deviation 等额外约束；
 - 期望步态保持达标的同时把高度/脚朝向/相位带进目标。
-| exp0.16 | 2026-08-12 | 从零训练 exp0.3 步态基底+少量目标约束；训练完成，回放中 | 回放中 | TASK_20260812_034 | bipay43147@barumart.com | model_3000.pt |
+| exp0.16 | 2026-08-12 | exp0.3 基底+少量约束从零训练；实际周期相位致高频小碎步，未达标 | 失败 | TASK_20260812_034 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.16：exp0.3 步态基底 + 少量目标约束（从零训练）
@@ -1645,6 +1645,90 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | --- | --- |
 | 训练方式 | 从零 |
 | GM 账号 | bipay43147@barumart.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务：TASK_20260812_034，2026-08-12 09:16:16 -> 10:21:49 完成 3000 轮，checkpoint model_3000.pt。
+> 回放任务：TASK_20260812_083（首任务 TASK_20260812_055 排队超时后重试），2026-08-12 11:53:35 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.3 | exp0.16 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.535m | 0.590m | ~0.61m | ❌ |
+| 高于 0.60m 占比 | 0.6% | 4.4% | 高 | ❌ |
+| 左/右膝均值 | 1.136/1.619 | 0.413/0.242 rad | 接近默认 | ⚠️ |
+| 脚朝向代理 | -0.066/+1.278 | +1.353/-0.797 rad | ≈0 | ❌ |
+| 左/右步频 | 1.25/1.20 | 3.10/2.80 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.800/0.833s | 0.322/0.357s | 0.55~0.85s | ❌ |
+| 估算步长 | 0.364m | 0.145m | >=0.30m | ❌ |
+| 抬脚高度 | 0.041/0.061m | 0.009/0.015m | >=0.03m | ❌ |
+| 相位偏移 | 0.663 | 0.806 | ~0.5 | ❌ |
+| 平均速度 | 0.446 m/s | 0.428 m/s | ≈0.5 | ⚠️ |
+
+**结论**：❌ 未达标（exp0.3 基底 + 少量约束从零训练仍崩成高频小碎步，步频 3.10、步长 0.145m）。
+**根因分析**：
+- exp0.13 / exp0.16 都用了“actual-cycle 相位奖励”，且都崩成 ~3.0 步频；exp0.3 / exp0.5 用固定 `cycle_target*0.5` 相位期望时步频只有 1.25 / 1.85；
+- actual-cycle 相位奖励让“任意步频都能拿满相位分”，把高频小碎步变成局部最优。
+**下一步方向**：
+- exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
+| exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+
+
+## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
+
+### 1. 上一实验结果与教训
+> exp0.16：exp0.3 基底 + 少量约束从零训练，仍崩成步频 3.10 的高频小碎步。
+>
+> **核心教训**：exp0.13 / exp0.16 均使用“actual-cycle 相位奖励”并都崩成 ~3.0 步频；exp0.3 / exp0.5 使用固定 `cycle_target*0.5` 相位期望时步频只有 1.25 / 1.85。actual-cycle 相位奖励会让高频小碎步也拿满相位分。
+
+### 2. 本轮修改目标
+- 相位期望恢复为固定 `cycle_target*0.5`；
+- 其余保持 exp0.16 配置（exp0.3 步态基底 + base_height 1.0 / feet_yaw 1.5 / swing_symmetry 1.5 / phase_offset 1.5）；
+- 期望步频回落到 1.2~1.8，同时高度/脚朝向/相位尽量靠近目标。
+
+### 3. 修改内容
+
+### 修改一：相位期望改回固定值
+`_update_step_buffers` 中：
+```python
+expected_phase = self.cycle_target * 0.5
+```
+替代 actual-cycle 的 `0.5 * self.last_cycle_time`。
+
+**理由**：actual-cycle 相位奖励是高频小碎步的主要诱因（exp0.13/0.16 均崩）。
+
+### 修改二：其余保持 exp0.16
+- stride_length 2.5、step_cycle 4.0、feet_air_time 3.0、feet_height 0.8、feet_clearance 1.0、flight -1.0、default_joint_pos 2.0；
+- base_height 1.0、feet_yaw 1.5、swing_symmetry 1.5、phase_offset 1.5、phase_offset_sigma 0.10；
+- knee_extension / joint_deviation 均为 0。
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_env.py`：相位期望恢复固定值。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | 待定（新建训练任务时确认） |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |

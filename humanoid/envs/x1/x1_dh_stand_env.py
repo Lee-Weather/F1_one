@@ -538,7 +538,7 @@ class X1DHStandEnv(LeggedRobot):
 
         other_start = torch.stack((self.last_swing_start_time[:, 1], self.last_swing_start_time[:, 0]), dim=1)
         time_since_other = (episode_steps - other_start) * self.dt
-        expected_phase = 0.5 * self.last_cycle_time
+        expected_phase = self.cycle_target * 0.5
         phase_err = torch.square(time_since_other - expected_phase)
         phase_sigma = self.cfg.rewards.phase_offset_sigma
         phase_rew = torch.exp(-phase_err / (2.0 * phase_sigma * phase_sigma))
