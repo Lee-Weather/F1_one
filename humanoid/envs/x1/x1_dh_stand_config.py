@@ -412,7 +412,7 @@ class X1DHStandCfgPPO(LeggedRobotCfgPPO):
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
-        learning_rate = 1e-3
+        learning_rate = 1e-4
         num_learning_epochs = 5
         gamma = 0.994
         lam = 0.9
@@ -426,7 +426,7 @@ class X1DHStandCfgPPO(LeggedRobotCfgPPO):
         policy_class_name = 'ActorCriticDH'
         algorithm_class_name = 'DHPPO'
         num_steps_per_env = 24  # per iteration
-        max_iterations = 3000  # number of policy updates
+        max_iterations = 1500  # number of policy updates
 
         # logging
         save_interval = 100  # check for potential saves every this many iterations
