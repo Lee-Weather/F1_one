@@ -333,21 +333,21 @@ class X1DHStandCfg(LeggedRobotCfg):
         stride_length_max = 0.35
         foot_yaw_sigma = 0.15
         swing_symmetry_sigma = 0.08
-        phase_offset_sigma = 0.08
+        phase_offset_sigma = 0.10
         
         class scales:
             feet_clearance = 1.0
             # gait
             feet_air_time = 3.0
-            step_cycle = 4.2
+            step_cycle = 4.0
             feet_height = 0.8
-            stride_length = 3.2
+            stride_length = 2.5
             foot_slip = -0.2
             feet_distance = 0.2
             knee_distance = 0.2
             # contact
             feet_contact_forces = -0.01
-            flight_penalty = -2.0
+            flight_penalty = -1.0
             feet_stumble = -0.5
             # vel tracking
             tracking_lin_vel = 2.0
@@ -356,16 +356,16 @@ class X1DHStandCfg(LeggedRobotCfg):
             low_speed = 0.5
             track_vel_hard = 0.6
             # base pos
-            default_joint_pos = 1.0
+            default_joint_pos = 2.0
             orientation = 1.
             feet_rotation = 0.3
             base_height = 1.0
-            knee_extension = 0.6
-            joint_deviation_hip = -0.5
-            joint_deviation_legs = -0.05
+            knee_extension = 0.0
+            joint_deviation_hip = 0.0
+            joint_deviation_legs = 0.0
             feet_yaw = 1.5
             swing_symmetry = 1.5
-            phase_offset = 2.0
+            phase_offset = 1.5
             base_acc = 0.2
             upward = 0.5
             # energy
@@ -412,7 +412,7 @@ class X1DHStandCfgPPO(LeggedRobotCfgPPO):
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
-        learning_rate = 1e-4
+        learning_rate = 1e-3
         num_learning_epochs = 5
         gamma = 0.994
         lam = 0.9
@@ -426,7 +426,7 @@ class X1DHStandCfgPPO(LeggedRobotCfgPPO):
         policy_class_name = 'ActorCriticDH'
         algorithm_class_name = 'DHPPO'
         num_steps_per_env = 24  # per iteration
-        max_iterations = 1500  # number of policy updates
+        max_iterations = 3000  # number of policy updates
 
         # logging
         save_interval = 100  # check for potential saves every this many iterations

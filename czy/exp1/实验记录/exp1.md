@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：exp0.15 回放中（从 exp0.5 model_2300 低学习率续训）；exp0.3 曾全部达标步态类指标但高度/脚朝向/相位不达标，exp0.5 最接近全达标。
+> **当前状态**：exp0.15 未达标；下一步 exp0.16 从零训练 exp0.3 步态基底 + 少量目标约束。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -24,7 +24,7 @@
 | exp0.12 | 2026-08-12 | 脚朝向线性惩罚+实际周期相位；双脚外翻、步频回升至 2.0，未达标 | 失败 | TASK_20260812_016 | bipay43147@barumart.com | model_3000.pt |
 | exp0.13 | 2026-08-12 | exp0.3 基底+直接关节脚朝向；脚朝向达标但步频 3.05、步长 0.165m，未达标 | 失败 | TASK_20260812_020 | bipay43147@barumart.com | model_3000.pt |
 | exp0.14 | 2026-08-12 | 从 exp0.5 model_2300 续训；高学习率导致步态漂移（步频 3.35），未达标 | 失败 | TASK_20260812_023 | bipay43147@barumart.com | model_5300.pt |
-| exp0.15 | 2026-08-12 | 从 exp0.5 model_2300 低学习率 1e-4 续训 1500 轮；回放中 | 回放中 | TASK_20260812_025 | bipay43147@barumart.com | model_3800.pt |
+| exp0.15 | 2026-08-12 | 从 exp0.5 model_2300 低学习率续训；仍漂移到步频 2.95，未达标 | 失败 | TASK_20260812_025 | bipay43147@barumart.com | model_3800.pt |
 
 ## 实验 exp0：无参考轨迹 3000 轮基线
 
@@ -1553,6 +1553,107 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | 镜像 | BJX00000001, V000021 |
 | 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
 | 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=1500` |
+
+### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务：TASK_20260812_025，2026-08-12 08:11:08 -> 08:49:24 完成 1500 轮续训（2300 -> 3800），checkpoint model_3800.pt。
+> 回放任务：TASK_20260812_031，2026-08-12 09:09:49 完成，输出 CSV 与 MP4。
+
+| 指标 | exp0.5 | exp0.15 | 目标 | 判定 |
+| --- | --- | --- | --- | --- |
+| 平均高度 | 0.603m | 0.591m | ~0.61m | ❌ |
+| 高于 0.60m 占比 | 65.4% | 12.9% | 高 | ❌ |
+| 左/右膝均值 | 0.584/0.616 | 0.392/0.589 rad | 接近默认 | ⚠️ |
+| 脚朝向代理 | -0.210/-0.016 | -0.472/-0.387 rad | ≈0 | ❌ |
+| 左/右步频 | 1.85/1.60 | 2.95/2.90 | 1.2~1.8 | ❌ |
+| 左/右周期 | 0.540/0.625s | 0.339/0.345s | 0.55~0.85s | ❌ |
+| 估算步长 | 0.298m | 0.197m | >=0.30m | ❌ |
+| 抬脚高度 | 0.037/0.036m | 0.051/0.035m | >=0.03m | ✅ |
+| 相位偏移 | 0.379 | 0.295 | ~0.5 | ❌ |
+| 平均速度 | 0.512 m/s | 0.577 m/s | ≈0.5 | ⚠️ 偏快 |
+
+**结论**：❌ 未达标（即使 lr=1e-4 + 1500 轮，续训仍漂移到步频 2.95、步长 0.197m；证明“从 exp0.5 续训微调”这条路不稳定）。
+**根因分析**：
+- 续训时 optimizer 重新初始化且奖励权重有变化，策略在 1500 轮内仍大幅漂移；
+- 依赖“接近达标模型 + 小幅微调”的策略不可控，应回到“从零训练 + 精简奖励”路线。
+**下一步方向**：
+- 从零训练，使用 exp0.3 已验证的步态基底（stride 2.5、step_cycle 4.0、air 3.0、feet_height 0.8、clearance 1.0、flight -1.0、default_joint_pos 2.0）；
+- 只叠加 base_height 1.0、feet_yaw 1.5、swing_symmetry 1.5、phase_offset 1.5，去掉 knee_extension/joint_deviation 等额外约束；
+- 期望步态保持达标的同时把高度/脚朝向/相位带进目标。
+| exp0.16 | 2026-08-12 | 从零训练 exp0.3 步态基底+少量目标约束；待训练 | 待训练 | TASK_TBD | 待定 | model_3000.pt |
+
+
+## 实验 exp0.16：exp0.3 步态基底 + 少量目标约束（从零训练）
+
+### 1. 上一实验结果与教训
+> exp0.15：即使 lr=1e-4 + 1500 轮，从 exp0.5 续训仍漂移到步频 2.95、步长 0.197m。
+>
+> **核心教训**：续训微调不可控；exp0.3 从零训练时步态指标全部达标（周期 0.8s、步频 1.25、步长 0.364m、抬脚达标），应该在该基底上只叠加少量目标约束，而不是在近边界模型上微调。
+
+### 2. 本轮修改目标
+- 从零训练，配置等于 exp0.3 步态基底；
+- 只叠加 base_height 1.0、feet_yaw 1.5、swing_symmetry 1.5、phase_offset 1.5（actual-cycle）；
+- 去掉 knee_extension/joint_deviation_hip/joint_deviation_legs 等额外约束，避免把步频推高。
+
+### 3. 修改内容
+
+### 修改一：回到 exp0.3 步态基底
+| 参数 | exp0.15 | exp0.16 |
+| --- | --- | --- |
+| stride_length | 3.2 | 2.5 |
+| step_cycle | 4.2 | 4.0 |
+| feet_air_time | 3.0 | 3.0 |
+| feet_height | 0.8 | 0.8 |
+| feet_clearance | 1.0 | 1.0 |
+| flight_penalty | -2.0 | -1.0 |
+| tracking_lin_vel | 2.0 | 2.0 |
+| low_speed | 0.5 | 0.5 |
+| default_joint_pos | 1.0 | 2.0 |
+| knee_extension | 0.6 | 0.0 |
+| joint_deviation_hip | -0.5 | 0.0 |
+| joint_deviation_legs | -0.05 | 0.0 |
+
+### 修改二：只保留少量目标约束
+| 参数 | 值 |
+| --- | --- |
+| base_height | 1.0 |
+| feet_yaw | 1.5（feet_euler） |
+| swing_symmetry | 1.5 |
+| phase_offset | 1.5（actual-cycle） |
+| phase_offset_sigma | 0.10 |
+
+### 修改三：关闭 OSS 续训
+`train.py` 的 `RESUME_CHECKPOINT_URL` 置空，从零训练。
+
+### 4. 修改文件
+- `humanoid/envs/x1/x1_dh_stand_config.py`：按上表调整权重。
+- `humanoid/scripts/train.py`：关闭续训 URL。
+
+### 5. 训练参数
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | 待定（新建训练任务时确认） |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
 
 ### 6. 预期与验收
 | 指标 | 目标 | 异常信号 |

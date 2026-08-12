@@ -40,7 +40,7 @@ from humanoid.envs import *
 from humanoid.utils import get_args, task_registry
 
 # Optional OSS checkpoint for fine-tuning from a previous experiment.
-RESUME_CHECKPOINT_URL = "https://limx-gradmotion.oss-cn-beijing.aliyuncs.com/upload%2F2026%2F8%2F11%2Fmodel_2300_20260811114745A283.pt?OSSAccessKeyId=LTAI5tMec8RQN1nZuRkVMgxz&Expires=1787087652&Signature=MB4rKIH77gLE7vwS6XldnV9Ot8U%3D"
+RESUME_CHECKPOINT_URL = ""
 
 def train(args):
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
