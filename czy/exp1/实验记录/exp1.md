@@ -1690,7 +1690,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 - actual-cycle 相位奖励让“任意步频都能拿满相位分”，把高频小碎步变成局部最优。
 **下一步方向**：
 - exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
-| exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；训练中 | 训练中 | TASK_20260812_127 | bipay43147@barumart.com | model_3000.pt |
+| exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；首任务排队卡住，重跑中 | 训练中 | TASK_20260812_146 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
