@@ -1693,7 +1693,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；两次任务均排队卡住未启动，弃用 | 已废弃 | TASK_20260812_127/146 | bipay43147@barumart.com | - |
 | exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），任务 3 次排队卡住未启动，弃用转 exp0.19 | 已废弃 | TASK_20260812_167/180 | bipay43147@barumart.com | - |
 | exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 失败（hip_yaw 漂移失控，CSV 已分析） | TASK_20260812_182 | bipay43147@barumart.com | model_2000.pt |
-| exp0.20 | 2026-08-12 | hip_yaw 目标改为 0 约束（default_joint_pos/joint_deviation_hip 重新纳入 hip_yaw，目标 0），其余保持 exp0.19 | 训练中 | TASK_20260812_256 | limxmspwo8w3969eot@emalupe.com | - |
+| exp0.20 | 2026-08-12 | hip_yaw 目标改为 0 约束（default_joint_pos/joint_deviation_hip 重新纳入 hip_yaw，目标 0），其余保持 exp0.19 | 训练中 | TASK_20260812_259 | limxmspwo8w3969eot@emalupe.com | - |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
@@ -2063,4 +2063,4 @@ expected_phase = self.cycle_target * 0.5
 
 ### 7. 实验结果
 
-> 待训练完成（TASK_20260812_256）后回放填表。
+> 待训练完成（TASK_20260812_259）后回放填表。
