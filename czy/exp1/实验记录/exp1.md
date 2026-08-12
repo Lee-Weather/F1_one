@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：exp0.17 训练中（固定相位期望 + exp0.3 基底 + 少量约束）。
+> **当前状态**：exp0.19 训练完成（model_2000），待 play 回放验证 CSV 指标。所有 GM 账号余额耗尽，阻塞中。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -1692,7 +1692,7 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 - exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
 | exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；两次任务均排队卡住未启动，弃用 | 已废弃 | TASK_20260812_127/146 | bipay43147@barumart.com | - |
 | exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），任务 3 次排队卡住未启动，弃用转 exp0.19 | 已废弃 | TASK_20260812_167/180 | bipay43147@barumart.com | - |
-| exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 训练中 | TASK_20260812_182 | bipay43147@barumart.com | - |
+| exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 训练完成/待回放 | TASK_20260812_182 | bipay43147@barumart.com | model_2000.pt |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
@@ -1933,4 +1933,42 @@ expected_phase = self.cycle_target * 0.5
 | 平均速度 | 0.525 m/s | ≈0.5 m/s | < 0.45 m/s |
 
 ### 7. 实验结果
-> 待训练完成、回放并分析 CSV 后补充。
+
+#### 7.1 训练概况
+
+| 项目 | 值 |
+| --- | --- |
+| Task ID | TASK_20260812_182 |
+| 训练状态 | 6（已终止，账号余额耗尽，仅完成到 model_2000） |
+| 实际迭代 | ~2000 / 3000 |
+| 训练时长 | ~47 分钟（16:31~17:19） |
+| commit | fbae4cc |
+
+#### 7.2 训练曲线分析（末段 reward 值）
+
+| Reward 分项 | 末段值 | 权重 | 评估 |
+| --- | --- | --- | --- |
+| mean_reward | ~190-195 | — | 收敛稳定 |
+| mean_episode_length | ~2341/2400 | — | **97.5%**，极少摔倒 |
+| feet_yaw | ~1.8 | 2.0 | **90%**，hip_yaw 修复生效 |
+| base_height | ~0.89 | 1.0 | **89%**，机身高度达标 |
+| tracking_lin_vel | ~1.13 | 1.5 | **75%**，速度跟踪良好 |
+| step_cycle | ~2.5 | 4.2 | 60%，周期引导中等 |
+| feet_clearance | ~0.35 | — | 抬脚引导中等 |
+| swing_symmetry | ~0.37 | 1.5 | 25%，摆动对称性偏低 |
+| stride_length | ~0.30 | 3.2 | 9%，步长引导偏低 |
+| phase_offset | ~0.03 | 2.0 | 稀疏 reward，单次 onset 约 0.5（合理） |
+
+#### 7.3 分析与结论
+
+1. **foot yaw 修复确认有效**：feet_yaw reward 从 exp0.5 的 ~0.5 提升到 1.8（+260%），证明从 `_reward_default_joint_pos` 和 `_reward_joint_deviation_hip` 中移除 hip_yaw 惩罚是正确的。
+2. **稳定性极好**：episode_length 达到 97.5%，几乎不摔。
+3. **待确认指标**：因所有 6 个 GM 账号余额耗尽（各 $50，共 $300），无法提交 play 回放任务获取 CSV，以下指标无法精确量化：
+   - 步长（stride_length reward 偏低，可能 < 0.30m）
+   - 抬脚高度（feet_clearance 中等）
+   - 脚朝向（feet_yaw reward 高，预计接近 0）
+   - 相位偏移（稀疏 reward，需 CSV 确认）
+
+#### 7.4 阻塞状态
+
+> **所有 6 个 GM-CLI 账号余额已耗尽**（peleha7269, yijed24226, jevid17601, memokaf419, repefi7583, bipay43147），无法提交 play 回放或新一轮训练任务。需用户新增账号或充值后方可继续。
