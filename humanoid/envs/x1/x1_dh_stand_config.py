@@ -339,15 +339,15 @@ class X1DHStandCfg(LeggedRobotCfg):
             feet_clearance = 1.0
             # gait
             feet_air_time = 3.0
-            step_cycle = 4.0
+            step_cycle = 4.2
             feet_height = 0.8
-            stride_length = 2.5
+            stride_length = 3.2
             foot_slip = -0.2
             feet_distance = 0.2
             knee_distance = 0.2
             # contact
             feet_contact_forces = -0.01
-            flight_penalty = -1.0
+            flight_penalty = -2.0
             feet_stumble = -0.5
             # vel tracking
             tracking_lin_vel = 2.0
@@ -356,16 +356,16 @@ class X1DHStandCfg(LeggedRobotCfg):
             low_speed = 0.5
             track_vel_hard = 0.6
             # base pos
-            default_joint_pos = 2.0
+            default_joint_pos = 1.0
             orientation = 1.
             feet_rotation = 0.3
             base_height = 1.0
-            knee_extension = 0.0
-            joint_deviation_hip = 0.0
-            joint_deviation_legs = 0.0
+            knee_extension = 0.6
+            joint_deviation_hip = -0.5
+            joint_deviation_legs = -0.05
             feet_yaw = 1.5
             swing_symmetry = 1.5
-            phase_offset = 1.5
+            phase_offset = 2.0
             base_acc = 0.2
             upward = 0.5
             # energy

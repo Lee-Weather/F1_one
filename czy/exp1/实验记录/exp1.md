@@ -1690,7 +1690,8 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 - actual-cycle 相位奖励让“任意步频都能拿满相位分”，把高频小碎步变成局部最优。
 **下一步方向**：
 - exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
-| exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；首任务排队卡住，重跑中 | 训练中 | TASK_20260812_146 | bipay43147@barumart.com | model_3000.pt |
+| exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；两次任务均排队卡住未启动，弃用 | 已废弃 | TASK_20260812_127/146 | bipay43147@barumart.com | - |
+| exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），从零训练补齐步长/步频/相位 | 待训练 | TASK_20260812_163 | bipay43147@barumart.com | model_3000.pt |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
@@ -1740,6 +1741,82 @@ expected_phase = self.cycle_target * 0.5
 | 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
 
 ### 6. 预期与验收
+| 指标 | 目标 | 异常信号 |
+| --- | --- | --- |
+| 机身高度 | ~0.61m | < 0.58m |
+| 相位偏移 | ~0.5 | < 0.4 |
+| 步频 | 1.2~1.8 | > 1.9 |
+| 单腿周期 | 0.55~0.85s | < 0.55s 或 > 0.9s |
+| 步长 | >=0.30m | < 0.25m |
+| 抬脚 | >=0.03m | < 0.02m |
+| 脚朝向 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> 训练任务 TASK_20260812_127 与重跑 TASK_20260812_146 均卡在平台排队（各排队 1 小时未分配资源），未能启动训练。方案未经验证，弃用，转 exp0.18。
+
+
+## 实验 exp0.18：exp0.5 基底 + 微调步长/周期/相位（从零训练）
+
+### 1. 上一实验结果与教训
+
+> 数据：exp0.5 play `isaac_diag.csv`（最接近全达标：高度 0.603m、脚朝向 -0.21/-0.02 rad、速度 0.512 m/s、抬脚 0.037/0.036m、步长 0.298m、左步频 1.85/1.60、左周期 0.540/0.625s、相位 0.379）。
+>
+> **核心教训**：
+> - exp0.5 是唯一“高度/脚朝向/速度/抬脚达标，仅步长/步频/相位差一点”的配置，且其差距极小（步长 0.298 vs 0.30、左步频 1.85 vs 1.8、左周期 0.540 vs 0.55、相位 0.379 vs 0.5）；
+> - exp0.11 曾以 exp0.5 为基底但同时放宽 default_joint_pos/knee_extension/joint_deviation_legs，导致步长 0.191m、右脚外撇 +1.397 rad 崩坏；exp0.14/0.15 从 exp0.5 续训也漂移。
+> - **结论**：不应大改基底，应精确复刻 exp0.5 的关节约束，只小幅调整 3 个步态权重。
+
+### 2. 本轮修改目标
+
+- 精确复刻 exp0.5 配置（关节约束齐全：default_joint_pos 1.0、knee_extension 0.6、joint_deviation_hip -0.5、joint_deviation_legs -0.05、feet_yaw 1.5、flight -2.0）；
+- 仅微调：stride_length 3.0→3.2（步长 0.298→≥0.30）、step_cycle 4.0→4.2（左步频 1.85→≤1.8）、phase_offset 1.5→2.0（相位 0.379→~0.5，固定期望）；
+- 从零训练 3000 轮，期望全部指标达标。
+
+### 3. 修改内容
+
+### 修改一：回到 exp0.5 关节约束基底
+
+| 参数 | exp0.17 | exp0.18 | 说明 |
+| --- | --- | --- | --- |
+| default_joint_pos | 2.0 | 1.0 | 回到 exp0.5 宽松度 |
+| knee_extension | 0.0 | 0.6 | 恢复膝盖伸展约束 |
+| joint_deviation_hip | 0.0 | -0.5 | 恢复 hip_yaw/roll/ankle_roll 约束 |
+| joint_deviation_legs | 0.0 | -0.05 | 恢复腿关节约束 |
+| flight_penalty | -1.0 | -2.0 | 回到 exp0.5 防腾空强度 |
+
+### 修改二：微调步态 3 项权重
+
+| 参数 | exp0.5 | exp0.18 | 说明 |
+| --- | --- | --- | --- |
+| stride_length | 3.0 | 3.2 | 步长 0.298 → ≥0.30 |
+| step_cycle | 4.0 | 4.2 | 左步频 1.85 → ≤1.8 |
+| phase_offset | 1.5 | 2.0 | 相位 0.379 → ~0.5（固定期望） |
+
+其余（feet_air_time 3.0、feet_height 0.8、feet_clearance 1.0、base_height 1.0、swing_symmetry 1.5、tracking_lin_vel 2.0、low_speed 0.5、track_vel_hard 0.6 等）保持 exp0.5 不变。
+
+### 4. 修改文件
+
+- `humanoid/envs/x1/x1_dh_stand_config.py`：按上表调整 weights。
+
+### 5. 训练参数
+
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | bipay43147@barumart.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+
+### 6. 预期与验收
+
 | 指标 | 目标 | 异常信号 |
 | --- | --- | --- |
 | 机身高度 | ~0.61m | < 0.58m |
