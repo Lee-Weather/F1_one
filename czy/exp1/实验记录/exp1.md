@@ -1691,7 +1691,8 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 **下一步方向**：
 - exp0.17 把相位期望恢复为固定 `cycle_target*0.5`，其余保持 exp0.16 配置，验证步频是否回落到 1.2~1.8。
 | exp0.17 | 2026-08-12 | exp0.3 基底+少量约束，相位期望改回固定值；两次任务均排队卡住未启动，弃用 | 已废弃 | TASK_20260812_127/146 | bipay43147@barumart.com | - |
-| exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），从零训练补齐步长/步频/相位 | 训练中 | TASK_20260812_180 | bipay43147@barumart.com | model_3000.pt |
+| exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），任务 3 次排队卡住未启动，弃用转 exp0.19 | 已废弃 | TASK_20260812_167/180 | bipay43147@barumart.com | - |
+| exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 训练中 | TASK_20260812_182 | bipay43147@barumart.com | - |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
@@ -1827,6 +1828,109 @@ expected_phase = self.cycle_target * 0.5
 | 抬脚 | >=0.03m | < 0.02m |
 | 脚朝向 | ≈0 | 单脚 > 0.15 rad |
 | 平均速度 | ≈0.5 m/s | < 0.45 m/s |
+
+### 7. 实验结果
+> TASK_20260812_167 和 TASK_20260812_180 均排队卡住未启动（各等 20+ 分钟无资源分配），弃用。分析根因后发现 exp0.5 左脚朝向 -0.254 rad 持续不达标的根因是 default_joint_pos 和 joint_deviation_hip 对 hip_yaw 的惩罚与 feet_yaw 奖励冲突，转 exp0.19 修复。
+
+
+## 实验 exp0.19：修复脚朝向根因——移除 hip_yaw 惩罚冲突
+
+### 1. 上一实验结果与教训
+
+> 数据：exp0.5 play `isaac_diag.csv` 分析结果（exp0.18 因排队未启动，使用 exp0.5 数据）。
+>
+> | 指标 | exp0.5 实测 | 目标 | 判定 |
+> | --- | --- | --- | --- |
+> | 机身高度 | 0.603m | ~0.61m | ✅ |
+> | 平均速度 | 0.525 m/s | ≈0.5 | ✅ |
+> | 左/右周期 | 0.594/0.599s | 0.55~0.85s | ✅ |
+> | 左/右步频 | 1.68/1.67 | 1.2~1.8 | ✅ |
+> | 左/右步长 | 0.312/0.314m | >=0.30m | ✅ |
+> | 左/右抬脚 | 0.033/0.026m | >=0.03m | ✅/❌ |
+> | 左/右脚朝向 | -0.254/0.066 rad | ≈0 | ❌/✅ |
+> | 相位偏移 | 0.352 | ~0.5 | ✅ |
+>
+> **核心教训**：
+> - 左脚朝向 -0.254 rad 是唯一严重不达标项（其余指标均通过或极接近）
+> - **根因分析**：`_reward_default_joint_pos` 对 hip_yaw 偏差施加高斯惩罚（exp(-100x)），`_reward_joint_deviation_hip` 对 hip_yaw 偏差施加线性惩罚。默认 hip_yaw = ∓0.31（外撇），两个惩罚合力阻止 hip_yaw 趋近 0，与 `feet_yaw` 奖励（期望脚朝向 ≈0）直接冲突
+> - 移除 hip_yaw 从两个惩罚组后，feet_yaw 奖励可无阻力地将脚朝向拉向 0
+
+### 2. 本轮修改目标
+
+- 修复脚朝向根因：从 `_reward_default_joint_pos` 和 `_reward_joint_deviation_hip` 中移除 hip_yaw 惩罚
+- feet_yaw 权重 1.5→2.0（消除冲突后增加引导力）
+- 保持 exp0.18 其余配置不变（stride 3.2 / step_cycle 4.2 / phase_offset 2.0 / 全部 exp0.5 关节约束）
+- 期望全部 8 项指标达标
+
+### 3. 修改内容
+
+### 修改一：default_joint_pos 移除 hip_yaw
+
+`_reward_default_joint_pos` 中：
+```python
+# 旧：left_yaw_roll = joint_diff[:, [1,2,5]]   # hip_roll, hip_yaw, ankle_roll
+# 新：left_roll = joint_diff[:, [1,5]]          # hip_roll, ankle_roll（仅）
+```
+对右侧同理。移除 hip_yaw 后，该奖励不再惩罚脚朝向调整。
+
+**理由**：hip_yaw 偏差惩罚（sigma=100 高斯）与 feet_yaw 奖励直接冲突，是左脚朝向持续不达标的根因。
+
+### 修改二：joint_deviation_hip 移除 hip_yaw
+
+```python
+# 旧：idx = [..., 'hip_yaw' in name or 'hip_roll' in name or 'ankle_roll' in name]
+# 新：idx = [..., 'hip_roll' in name or 'ankle_roll' in name]
+```
+
+**理由**：同上，移除 hip_yaw 线性惩罚，让 feet_yaw 奖励独占 hip_yaw 引导。
+
+### 修改三：feet_yaw 权重 1.5→2.0
+
+| 参数 | 旧值 | 新值 | 说明 |
+| --- | --- | --- | --- |
+| feet_yaw | 1.5 | 2.0 | 消除冲突后加强脚朝向引导 |
+
+### 修改四：继承 exp0.18 步态权重
+
+| 参数 | exp0.5 | exp0.19 | 说明 |
+| --- | --- | --- | --- |
+| stride_length | 3.0 | 3.2 | 微增步长 |
+| step_cycle | 4.0 | 4.2 | 微降步频 |
+| phase_offset | 1.5 | 2.0 | 增强反相位引导 |
+
+### 4. 修改文件
+
+- `humanoid/envs/x1/x1_dh_stand_env.py`：`_reward_default_joint_pos` 移除 hip_yaw；`_reward_joint_deviation_hip` 移除 hip_yaw。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：feet_yaw 1.5→2.0（stride 3.2 / step_cycle 4.2 / phase 2.0 保持 exp0.18）。
+
+### 5. 训练参数
+
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | bipay43147@barumart.com |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+
+### 6. 预期与验收
+
+| 指标 | exp0.5 实测 | 本轮目标 | 异常信号 |
+| --- | --- | --- | --- |
+| 机身高度 | 0.603m | ~0.61m | < 0.58m |
+| 相位偏移 | 0.352 | ~0.5 | < 0.35 |
+| 左/右步频 | 1.68/1.67 | 1.2~1.8 | > 1.9 |
+| 左/右周期 | 0.594/0.599s | 0.55~0.85s | < 0.55s |
+| 左/右步长 | 0.312/0.314m | >=0.30m | < 0.25m |
+| 左/右抬脚 | 0.033/0.026m | >=0.03m | < 0.02m |
+| 左/右脚朝向 | -0.254/0.066 | ≈0 | 单脚 > 0.15 rad |
+| 平均速度 | 0.525 m/s | ≈0.5 m/s | < 0.45 m/s |
 
 ### 7. 实验结果
 > 待训练完成、回放并分析 CSV 后补充。
