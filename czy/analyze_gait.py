@@ -114,12 +114,15 @@ def analyze_gait(csv_path):
     step_len_l = avg_vel * cycle_l_mean if cycle_l_mean > 0 else 0
     step_len_r = avg_vel * cycle_r_mean if cycle_r_mean > 0 else 0
 
-    # === 9. Foot orientation (yaw from hip joints) ===
-    # DOF order: [l_hip_pitch, l_hip_roll, l_hip_yaw, l_knee, l_ankle_pitch, l_ankle_roll,
-    #             r_hip_pitch, r_hip_roll, r_hip_yaw, r_knee, r_ankle_pitch, r_ankle_roll]
-    # Foot yaw relative to base ≈ hip_yaw joint angle (pitch/roll joints don't contribute to yaw)
-    foot_yaw_l = ss["dof_pos_2"].mean()  # left_hip_yaw_joint
-    foot_yaw_r = ss["dof_pos_8"].mean()  # right_hip_yaw_joint
+    # === 9. Foot orientation (真实脚朝向：feet yaw 相对 base yaw) ===
+    # CSV 由 play_gm.py 记录 foot_yaw_l/foot_yaw_r = feet_euler_xyz[:, :, 2] - base_yaw
+    if "foot_yaw_l" in ss.columns:
+        foot_yaw_l = ss["foot_yaw_l"].mean()
+        foot_yaw_r = ss["foot_yaw_r"].mean()
+    else:
+        # 旧 CSV 回退：用 hip_yaw 关节角（X1 的 hip_yaw 轴非竖直，仅粗略）
+        foot_yaw_l = ss["dof_pos_2"].mean()
+        foot_yaw_r = ss["dof_pos_8"].mean()
 
     # === Summary ===
     metrics = {

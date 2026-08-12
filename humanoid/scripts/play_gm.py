@@ -126,6 +126,7 @@ def save_diag_csv(diag_data, experiment_name="x1_dh_stand", num_actions=12, dt=0
     csv_path = os.path.join(log_dir, "isaac_diag.csv")
 
     header = ["step", "time_s", "base_height", "base_vel_x", "base_vel_y", "base_vel_yaw",
+              "base_yaw", "foot_yaw_l", "foot_yaw_r",
               "command_x", "foot_z_l", "foot_z_r", "foot_force_l", "foot_force_r"]
     header += [f"dof_pos_{i}" for i in range(num_actions)]
     header += [f"dof_vel_{i}" for i in range(num_actions)]
@@ -137,7 +138,9 @@ def save_diag_csv(diag_data, experiment_name="x1_dh_stand", num_actions=12, dt=0
         for i in range(len(diag_data["base_height"])):
             row = [i, round(i * dt, 6), diag_data["base_height"][i],
                    diag_data["base_vel_x"][i], diag_data["base_vel_y"][i],
-                   diag_data["base_vel_yaw"][i], diag_data["command_x"][i],
+                   diag_data["base_vel_yaw"][i], diag_data["base_yaw"][i],
+                   diag_data["foot_yaw_l"][i], diag_data["foot_yaw_r"][i],
+                   diag_data["command_x"][i],
                    diag_data["foot_z_l"][i], diag_data["foot_z_r"][i],
                    diag_data["foot_force_l"][i], diag_data["foot_force_r"][i]]
             row += diag_data["dof_pos"][i]
@@ -261,6 +264,9 @@ def play(args):
         "base_vel_x": [],
         "base_vel_y": [],
         "base_vel_yaw": [],
+        "base_yaw": [],
+        "foot_yaw_l": [],
+        "foot_yaw_r": [],
         "command_x": [],
         "foot_z_l": [],
         "foot_z_r": [],
@@ -290,6 +296,13 @@ def play(args):
         diag["base_vel_x"].append(env.base_lin_vel[0, 0].item())
         diag["base_vel_y"].append(env.base_lin_vel[0, 1].item())
         diag["base_vel_yaw"].append(env.base_ang_vel[0, 2].item())
+        base_quat = env.root_states[0, 3:7]
+        base_yaw = torch.atan2(2.0 * (base_quat[3] * base_quat[2] + base_quat[0] * base_quat[1]),
+                               1.0 - 2.0 * (base_quat[1] * base_quat[1] + base_quat[2] * base_quat[2]))
+        diag["base_yaw"].append(base_yaw.item())
+        # 真实脚朝向：脚全局 yaw 相对 base yaw（feet_euler_xyz[:, :, 2]）
+        diag["foot_yaw_l"].append(env.feet_euler_xyz[0, 0, 2].item() - base_yaw.item())
+        diag["foot_yaw_r"].append(env.feet_euler_xyz[0, 1, 2].item() - base_yaw.item())
         diag["command_x"].append(env.commands[0, 0].item())
         diag["foot_z_l"].append(env.rigid_state[0, left_foot_idx, 2].item())
         diag["foot_z_r"].append(env.rigid_state[0, right_foot_idx, 2].item())
