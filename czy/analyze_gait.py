@@ -116,9 +116,13 @@ def analyze_gait(csv_path):
 
     # === 9. Foot orientation (真实脚朝向：feet yaw 相对 base yaw) ===
     # CSV 由 play_gm.py 记录 foot_yaw_l/foot_yaw_r = feet_euler_xyz[:, :, 2] - base_yaw
+    # 注意：raw 值可能超出 [-pi,pi]（如 3.1 跳到 -3.1 的 wrap 跳变），必须 wrap 后再取均值
+    def wrap_to_pi_ser(s):
+        return ((s + np.pi) % (2 * np.pi)) - np.pi
+
     if "foot_yaw_l" in ss.columns:
-        foot_yaw_l = ss["foot_yaw_l"].mean()
-        foot_yaw_r = ss["foot_yaw_r"].mean()
+        foot_yaw_l = wrap_to_pi_ser(ss["foot_yaw_l"]).mean()
+        foot_yaw_r = wrap_to_pi_ser(ss["foot_yaw_r"]).mean()
     else:
         # 旧 CSV 回退：用 hip_yaw 关节角（X1 的 hip_yaw 轴非竖直，仅粗略）
         foot_yaw_l = ss["dof_pos_2"].mean()
