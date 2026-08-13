@@ -302,12 +302,20 @@ def play(args):
         diag["base_yaw"].append(base_yaw.item())
         # 真实脚朝向：脚局部前向轴(+z，URDF 名义位姿 FK 验证：local_z≈base+X)投影到水平面的航向角，相对 base yaw
         # 注：feet_euler_xyz[:,:,2] 因 ankle_roll_link rpy=(0,pi/2,0) 万向锁产生固定伪影(≈1.89/1.65 rad)，不可用
-        feet_quat = env.feet_quat  # (num_envs, num_feet, 4)
-        foot_local_z = torch.zeros(feet_quat.shape[:-1] + (3,), device=env.device)
-        foot_local_z[..., 2] = 1.0
-        foot_fwd = quat_rotate(feet_quat, foot_local_z)  # 脚前向轴在世界系
+        # 注2：不可用 quat_rotate——GM 镜像中的实现内部 torch.cross 对 (...,4) 四元数直接叉乘会报
+        #      "linalg.cross: inputs dimension -1 must have length 3. Got 4 and 3"（TASK_20260813_027 已实测崩溃）。
+        #      此处手写四元数旋转局部 (0,0,1)（与 isaacgym quat_rotate 同 Hamilton 约定）。
+        feet_quat = env.feet_quat  # (num_envs, num_feet, 4) wxyz
+        fqw = feet_quat[..., 0:1]
+        fqx = feet_quat[..., 1:2]
+        fqy = feet_quat[..., 2:3]
+        fqz = feet_quat[..., 3:4]
+        foot_fwd_x = 2.0 * (fqx * fqz + fqw * fqy)
+        foot_fwd_y = 2.0 * (fqy * fqz - fqw * fqx)
+        foot_fwd_z = 1.0 - 2.0 * (fqx * fqx + fqy * fqy)
+        foot_fwd = torch.cat([foot_fwd_x, foot_fwd_y, foot_fwd_z], dim=-1)  # 脚前向轴在世界系
         foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
-        foot_yaw_rel = wrap_to_pi(foot_yaw_world - base_yaw)
+        foot_yaw_rel = (foot_yaw_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch.pi
         diag["foot_yaw_l"].append(foot_yaw_rel[0, 0].item())
         diag["foot_yaw_r"].append(foot_yaw_rel[0, 1].item())
         diag["command_x"].append(env.commands[0, 0].item())

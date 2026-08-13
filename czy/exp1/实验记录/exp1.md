@@ -2145,7 +2145,7 @@ foot_yaw_rel = wrap_to_pi(foot_yaw_world - base_yaw)   # 相对 base 航向
 ### 5. 下一步
 
 - 用修复后的 play_gm.py 重新回放 exp0.5 model_2300（真实 foot_yaw 落地验证）。
-- 验证任务：TASK_20260813_027（2026-08-13 08:16 启动，账号 limxmspwpf4mh2aijb）。
+- 验证任务 TASK_20260813_027 失败：镜像中 `quat_rotate` 内部 `torch.cross` 对 (...,4) 四元数直接叉乘报 `linalg.cross: Got 4 and 3`，CSV 未生成（视频正常）。已改为**手写四元数旋转局部 (0,0,1)**（与 isaacgym quat_rotate 同 Hamilton 约定，numpy 对照验证误差 0），重新提交任务验证。
 - 若 exp0.5 实际达标（此前 7/8 项已达标，仅"脚朝向"可能假阳性）→ 以 exp0.5 配置为最终基线，无需重训。
 
 
