@@ -650,7 +650,8 @@ class X1DHStandEnv(LeggedRobot):
         fqz = feet_quat[..., 3:4]
         foot_fwd_x = 2.0 * (fqx * fqz + fqw * fqy)
         foot_fwd_y = 2.0 * (fqy * fqz - fqw * fqx)
-        foot_yaw = torch.atan2(foot_fwd_y, foot_fwd_x)  # 脚前向轴世界航向
+        foot_fwd = torch.cat([foot_fwd_x, foot_fwd_y], dim=-1)  # (N,F,2)
+        foot_yaw = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])  # 脚前向轴世界航向 (N,F)
         yaw_err = wrap_to_pi(foot_yaw - base_yaw.unsqueeze(1))
         sigma = self.cfg.rewards.foot_yaw_sigma
         rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma))
