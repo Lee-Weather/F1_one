@@ -2207,6 +2207,7 @@ foot_yaw_rel = (foot_yaw_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch
 
 | 参数 | 值 |
 | --- | --- |
+| Task ID | TASK_20260813_030（v1 TASK_20260813_029 因张量形状崩溃弃用） |
 | 训练方式 | 从零 |
 | GM 账号 | limxmspwpf4mh2aijb |
 | max_iterations | 3000 |
