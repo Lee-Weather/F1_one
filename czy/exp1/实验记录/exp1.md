@@ -4,7 +4,7 @@
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
 > **当前状态**：已定位脚朝向测量根因（`feet_euler_xyz[:,:,2]` 因 ankle_roll_link rpy=(0,π/2,0) 万向锁产生固定伪影 ≈1.89/1.65 rad，不可用）；URDF FK 验证 X1 脚 link 前向轴为**局部 +z**（名义位姿下 ≈ base +X）；play_gm.py 已改用 `quat_rotate(feet_quat, [0,0,1])` 水平投影测量真实脚朝向。已提交修复（commit 940a540），play 验证任务 TASK_20260813_027（exp0.5 model_2300）已启动。
-> **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
+> **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件；**每次 play 回放后必须下载并归档 `play_output.mp4` 视频**（后续所有模型均需视频，exp0.19/exp0.20 已于 2026-08-13 补齐）。
 
 
 | 编号 | 日期 | 摘要 | 状态 | Task ID | GM账号 | checkpoint |
@@ -1972,7 +1972,11 @@ expected_phase = self.cycle_target * 0.5
    - 机身高度 0.596m（目标 ~0.61m）✅
 3. **根因**：完全移除 hip_yaw 惩罚后，策略让 hip_yaw 逼近关节极限（1.42 rad ≈ 81°），说明移除约束"矫枉过正"，需要一个**目标为 0 的 hip_yaw 约束**（既非 default ∓0.31 外八字，也非完全自由）。
 
-#### 7.4 下一步（exp0.20）
+#### 7.4 数据归档（2026-08-13 补齐视频）
+
+- `czy/data/exp0_19/`：isaac_diag.csv、model_isaac_csv.pt、play_output.mp4（23.9MB，TASK_20260812_254）。
+
+#### 7.5 下一步（exp0.20）
 
 - `_reward_default_joint_pos`：hip_yaw 偏差目标改为 0（`joint_diff[:, [2,8]] = dof_pos[:, [2,8]]`），重新纳入 roll 组惩罚
 - `_reward_joint_deviation_hip`：hip_yaw 以目标 0 重新加入
@@ -2065,6 +2069,7 @@ expected_phase = self.cycle_target * 0.5
 
 > 训练 TASK_20260812_259 已完成（3000 轮，20:22:40 结束，model_3000.pt）。
 > 回放 TASK_20260812_297 已生成 CSV（20:45:56 结束）。
+> 数据归档：`czy/data/exp0_20/`：isaac_diag.csv、model_isaac_csv.pt、play_output.mp4（24.7MB，2026-08-13 补齐）。
 
 | 指标 | exp0.19 实测 | exp0.20 实测 | 目标 | 判定 |
 | --- | --- | --- | --- | --- |
