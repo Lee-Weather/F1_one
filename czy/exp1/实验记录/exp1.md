@@ -649,6 +649,28 @@
 
 **下一轮方向**：exp0.6 尝试强化周期/步长/对称权重。
 
+#### 8. 真实脚朝向复验（2026-08-13，TASK_20260813_028，commit 8a6bb58）
+
+> 使用修复后的 play_gm.py（脚局部 +z 水平投影，手写四元数旋转，无万向锁伪影）重新回放 model_2300。
+> 数据：`czy/data/exp0_5_v2/`（isaac_diag.csv + play_output.mp4 已归档）。
+
+| 指标 | 值 | 目标 | 判定 |
+| --- | --- | --- | --- |
+| 机身高度 | 0.6027 | ~0.61m | ✅ |
+| 平均速度 | 0.5249 | ≈0.5 | ✅ |
+| 周期 L/R | 0.594/0.599s | 0.55~0.85s | ✅ |
+| 步频 L/R | 1.682/1.670 | 1.2~1.8 | ✅ |
+| 步长 L/R | 0.312/0.314m | >=0.30m | ✅ |
+| 抬脚 L/R | 0.0325/0.0261m | >=0.03m | ✅/❌ |
+| 脚朝向 L/R | 0.0048/-0.294 rad | ≈0 | ✅/❌ |
+| 相位偏移 | 0.352 | ~0.5 | ✅ |
+
+**结论**：真实脚朝向下 exp0.5 为 11/12 达标，**仅剩抬脚右（0.0261）与右脚朝向（-0.294 rad ≈ -17° 外撇）**。
+- 之前用 `feet_euler_xyz[:,:,2]` 测出 1.894 rad 是万向锁伪影，不代表真实脚朝向；
+- 左脚本就朝前（0.005 rad），说明 exp0.5 的默认 hip_yaw(-0.31) 约束与步态组合对左脚有效，右脚是例外；
+- `_reward_feet_yaw` 训练时用的是伪影测量（无梯度），需改为真实脚朝向测量。
+
+
 ---
 
 ## 实验 exp0.6：强化周期/步长/对称奖励
@@ -2128,26 +2150,81 @@ RIGHT foot local_x -> base -Y(右), local_y -> -Z(下), local_z -> +X(前, +1.84
 - **左右脚的前向轴都是局部 +z**（水平 yaw 与 base +X 偏差仅 ±1.8°，且来自默认 hip_yaw 的镜面对称，投影后不影响 yaw 测量）。
 - 局部 y 轴左右相反（左 +Z 上 / 右 -Z 下），印证右脚欧拉角伪影不同（1.65 vs 1.89）。
 
-### 4. 修复：play_gm.py 改用脚局部 +z 的水平投影
+### 4. 修复：play_gm.py 改用脚局部 +z 的水平投影（最终版：手写四元数旋转）
 
 ```python
-feet_quat = env.feet_quat                       # (num_envs, num_feet, 4)
-foot_local_z = torch.zeros(feet_quat.shape[:-1] + (3,), device=env.device)
-foot_local_z[..., 2] = 1.0
-foot_fwd = quat_rotate(feet_quat, foot_local_z)  # 脚前向轴在世界系
-foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
-foot_yaw_rel = wrap_to_pi(foot_yaw_world - base_yaw)   # 相对 base 航向
+feet_quat = env.feet_quat                       # (num_envs, num_feet, 4) wxyz
+fqw = feet_quat[..., 0:1]; fqx = feet_quat[..., 1:2]
+fqy = feet_quat[..., 2:3]; fqz = feet_quat[..., 3:4]
+foot_fwd_x = 2.0 * (fqx * fqz + fqw * fqy)      # 旋转局部 (0,0,1) -> 世界
+foot_fwd_y = 2.0 * (fqy * fqz - fqw * fqx)
+foot_yaw_world = torch.atan2(foot_fwd_y, foot_fwd_x)
+foot_yaw_rel = (foot_yaw_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch.pi
 ```
 
-- 已提交于 `humanoid/scripts/play_gm.py`（commit 940a540）。
-- 注意：训练侧 `_reward_feet_yaw`（x1_dh_stand_env.py L647）仍用旧的 `feet_euler_xyz[:,:,2]`，若需真实脚朝向引导，后续重训时应同步改为局部 +z 投影。
+- 已提交于 `humanoid/scripts/play_gm.py`（commit 940a540 初版 quat_rotate 在镜像崩溃，最终手写版 commit 0cddef2，numpy 对照验证误差 0）。
+- 训练侧 `_reward_feet_yaw` 已同步改为同一测量（commit 待 exp0.21 提交）。
 
 ### 5. 下一步
 
 - 用修复后的 play_gm.py 重新回放 exp0.5 model_2300（真实 foot_yaw 落地验证）。
-- 验证任务 TASK_20260813_027 失败：镜像中 `quat_rotate` 内部 `torch.cross` 对 (...,4) 四元数直接叉乘报 `linalg.cross: Got 4 and 3`，CSV 未生成（视频正常）。已改为**手写四元数旋转局部 (0,0,1)**（与 isaacgym quat_rotate 同 Hamilton 约定，numpy 对照验证误差 0），重新提交任务验证。
-- **正在运行**：TASK_20260813_028（08:39 启动，commit 0cddef2 含修复）→ 完成后下载 CSV + 视频归档。
-- 若 exp0.5 实际达标（此前 7/8 项已达标，仅"脚朝向"可能假阳性）→ 以 exp0.5 配置为最终基线，无需重训。
+- 验证任务 TASK_20260813_027 失败：镜像中 `quat_rotate` 内部 `torch.cross` 对 (...,4) 四元数直接叉乘报 `linalg.cross: Got 4 and 3`，CSV 未生成（视频正常）。已改为**手写四元数旋转局部 (0,0,1)** 重新验证。
+- 复验 TASK_20260813_028 已完成：exp0.5 真实脚朝向下 **11/12 达标**，仅剩抬脚右 0.0261 与右脚朝向 -0.294 rad → 进入 exp0.21 重训。
+
+---
+
+## 实验 exp0.21：真实脚朝向奖励 + 抬脚加强（基于 exp0.5 精确配置）
+
+### 1. 上一实验结果与教训
+
+> exp0.5（真实测量复验）11/12 达标：仅剩 **抬脚右 0.0261m**（需 ≥0.03）与 **右脚朝向 -0.294 rad**（≈-17° 外撇）。
+> 根因：
+> 1. `_reward_feet_yaw` 训练时用 `feet_euler_xyz[:,:,2]`（万向锁伪影 ~1.89/1.65 rad，无梯度），右脚从未被真实引导；
+> 2. 抬脚奖励（feet_clearance 1.0 / feet_height 0.8）不足以把右脚抬高过 0.03m。
+
+### 2. 本轮修改目标
+
+- 让 `_reward_feet_yaw` 使用**真实脚朝向**（脚局部 +z 水平投影，与 play_gm.py 测量一致），把右脚从 -0.294 rad 拉回 ≈0；
+- 加强抬脚奖励，把右脚从 0.0261 抬过 0.03m；
+- 其余保持 exp0.5（2af981f）精确配置，避免引入 exp0.19/0.20 的 hip_yaw 目标 0 回归（exp0.20 转圈）。
+
+### 3. 修改内容
+
+- `humanoid/envs/x1/x1_dh_stand_env.py`：
+  - `_reward_feet_yaw`：`feet_euler_xyz[:,:,2]`（伪影）→ 手写四元数旋转脚局部 (0,0,1) 的水平航向角（Hamilton 约定，与 play_gm.py 相同）。
+- `humanoid/envs/x1/x1_dh_stand_config.py`：
+  - `feet_clearance` 1.0 → 1.5；
+  - `feet_height` 0.8 → 1.2；
+  - `feet_yaw` 1.5 → 2.0（奖励修复后真正生效，助力右脚）。
+
+### 4. 修改文件
+
+- `humanoid/envs/x1/x1_dh_stand_env.py`
+- `humanoid/envs/x1/x1_dh_stand_config.py`
+
+### 5. 训练参数
+
+| 参数 | 值 |
+| --- | --- |
+| 训练方式 | 从零 |
+| GM 账号 | limxmspwpf4mh2aijb |
+| max_iterations | 3000 |
+| save_interval | 100 |
+| num_envs | 4096 |
+| seed | 5 |
+| learning_rate | 1e-3 |
+| 算力 | 1x4090D 24G, ESKU000001 |
+| 镜像 | BJX00000001, V000021 |
+| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+
+### 6. 预期与验收
+
+- 脚朝向 L/R ≈ 0（重点右脚）；
+- 抬脚 L/R ≥ 0.03m（重点右脚）；
+- 其余 6 项保持 exp0.5 达标水平（高度 ~0.60、速度 ~0.52、周期 0.59s、步频 1.67、步长 0.31、相位 0.35）。
+- 全部 12 子项达标即收尾；视频 + CSV 归档 `czy/data/exp0_21/`。
+
 
 
 

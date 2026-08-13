@@ -333,15 +333,15 @@ class X1DHStandCfg(LeggedRobotCfg):
         stride_length_max = 0.35
         foot_yaw_sigma = 0.15
         swing_symmetry_sigma = 0.08
-        phase_offset_sigma = 0.10
+        phase_offset_sigma = 0.1
         
         class scales:
-            feet_clearance = 1.0
+            feet_clearance = 1.5
             # gait
             feet_air_time = 3.0
-            step_cycle = 4.2
-            feet_height = 0.8
-            stride_length = 3.2
+            step_cycle = 4.0
+            feet_height = 1.2
+            stride_length = 3.0
             foot_slip = -0.2
             feet_distance = 0.2
             knee_distance = 0.2
@@ -365,7 +365,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             joint_deviation_legs = -0.05
             feet_yaw = 2.0
             swing_symmetry = 1.5
-            phase_offset = 2.0
+            phase_offset = 1.5
             base_acc = 0.2
             upward = 0.5
             # energy

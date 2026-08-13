@@ -449,7 +449,6 @@ class X1DHStandEnv(LeggedRobot):
         self.max_stride_dist[env_ids] = 0.
         self.foot_stride_dense_rew[env_ids] = 0.
         self.last_swing_duration[env_ids] = 0.
-        self.last_cycle_time[env_ids] = 0.
         self.swing_symmetry_rew[env_ids] = 0.
         self.foot_phase_rew[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
@@ -507,7 +506,6 @@ class X1DHStandEnv(LeggedRobot):
         self.max_stride_dist = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.foot_stride_dense_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.last_swing_duration = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
-        self.last_cycle_time = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
         self.swing_symmetry_rew = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self.foot_phase_rew = torch.zeros(self.num_envs, self.num_feet, dtype=torch.float, device=self.device)
 
@@ -544,8 +542,6 @@ class X1DHStandEnv(LeggedRobot):
         phase_rew = torch.exp(-phase_err / (2.0 * phase_sigma * phase_sigma))
         phase_valid = onset & (other_start >= 0.0)
         self.foot_phase_rew = torch.where(phase_valid, phase_rew, torch.zeros_like(phase_rew))
-
-        self.last_cycle_time = torch.where(onset, cycle_time, self.last_cycle_time)
 
         new_time = torch.where(onset, episode_steps, self.last_swing_start_time)
         new_pos = torch.where(onset.unsqueeze(-1), self.rigid_state[:, self.feet_indices, :3], self.last_swing_start_pos)
@@ -644,17 +640,25 @@ class X1DHStandEnv(LeggedRobot):
 
     def _reward_feet_yaw(self):
         base_yaw = torch.atan2(2.0 * (self.base_quat[:, 3] * self.base_quat[:, 2] + self.base_quat[:, 0] * self.base_quat[:, 1]), 1.0 - 2.0 * (self.base_quat[:, 1] * self.base_quat[:, 1] + self.base_quat[:, 2] * self.base_quat[:, 2]))
-        yaw_err = wrap_to_pi(self.feet_euler_xyz[:, :, 2] - base_yaw.unsqueeze(1))
+        # 真实脚朝向：脚局部前向轴(+z，URDF 名义位姿 FK 验证 local_z≈base+X)水平投影航向角 相对 base yaw
+        # 注：feet_euler_xyz[:,:,2] 因 ankle_roll_link rpy=(0,pi/2,0) 万向锁产生固定伪影(≈1.89/1.65 rad)，
+        #     与真实脚朝向无关，必须用局部 +z 投影（与 play_gm.py 测量一致）。
+        feet_quat = self.feet_quat  # (num_envs, num_feet, 4) wxyz
+        fqw = feet_quat[..., 0:1]
+        fqx = feet_quat[..., 1:2]
+        fqy = feet_quat[..., 2:3]
+        fqz = feet_quat[..., 3:4]
+        foot_fwd_x = 2.0 * (fqx * fqz + fqw * fqy)
+        foot_fwd_y = 2.0 * (fqy * fqz - fqw * fqx)
+        foot_yaw = torch.atan2(foot_fwd_y, foot_fwd_x)  # 脚前向轴世界航向
+        yaw_err = wrap_to_pi(foot_yaw - base_yaw.unsqueeze(1))
         sigma = self.cfg.rewards.foot_yaw_sigma
         rew = torch.exp(-torch.square(yaw_err) / (2.0 * sigma * sigma))
         return rew.sum(dim=1)
 
     def _reward_joint_deviation_hip(self):
-        # 惩罚 hip_roll/ankle_roll 偏离 default，hip_yaw 目标 0（脚朝向直行，防止失控）
-        idx = [i for i, name in enumerate(self.dof_names) if ('hip_roll' in name or 'ankle_roll' in name)]
+        idx = [i for i, name in enumerate(self.dof_names) if ('hip_yaw' in name or 'hip_roll' in name or 'ankle_roll' in name)]
         diff = self.dof_pos[:, idx] - self.default_dof_pos[:, idx]
-        yaw_idx = [i for i, name in enumerate(self.dof_names) if 'hip_yaw' in name]
-        diff = torch.cat((diff, self.dof_pos[:, yaw_idx]), dim=1)
         return torch.sum(torch.abs(diff), dim=1)
 
     def _reward_joint_deviation_legs(self):
@@ -680,16 +684,13 @@ class X1DHStandEnv(LeggedRobot):
 
     def _reward_default_joint_pos(self):
         """
-        Calculates the reward for keeping joint positions close to default positions, with a focus
-        on penalizing deviation in roll directions. hip_yaw 目标改为 0（脚朝向直行），
-        避免与 feet_yaw 冲突，同时防止 hip_yaw 失控漂移（exp0.19 教训）。
+        Calculates the reward for keeping joint positions close to default positions, with a focus 
+        on penalizing deviation in yaw and roll directions. Excludes yaw and roll from the main penalty.
         """
         joint_diff = self.dof_pos - self.default_joint_pd_target
-        # hip_yaw 目标 0，其余保持 default 目标
-        joint_diff[:, [2, 8]] = self.dof_pos[:, [2, 8]]
-        left_roll = joint_diff[:, [1, 2, 5]]
-        right_roll = joint_diff[:, [7, 8, 11]]
-        yaw_roll = torch.norm(left_roll, dim=1) + torch.norm(right_roll, dim=1)
+        left_yaw_roll = joint_diff[:, [1,2,5]]
+        right_yaw_roll = joint_diff[:, [7,8,11]]
+        yaw_roll = torch.norm(left_yaw_roll, dim=1) + torch.norm(right_yaw_roll, dim=1)
         yaw_roll = torch.clamp(yaw_roll - 0.1, 0, 50)
         return torch.exp(-yaw_roll * 100) - 0.01 * torch.norm(joint_diff, dim=1)
 
