@@ -1716,7 +1716,8 @@ rew = torch.exp(-torch.square(foot_yaw) / (2.0 * sigma * sigma)) - 0.8 * torch.a
 | exp0.18 | 2026-08-12 | exp0.5 基底+仅微调 3 项（stride 3.2/step_cycle 4.2/phase 2.0），任务 3 次排队卡住未启动，弃用转 exp0.19 | 已废弃 | TASK_20260812_167/180 | bipay43147@barumart.com | - |
 | exp0.19 | 2026-08-12 | exp0.5 基底+修复脚朝向根因：从 default_joint_pos/joint_deviation_hip 移除 hip_yaw 惩罚，feet_yaw 1.5→2.0 | 失败（hip_yaw 漂移失控，CSV 已分析；视频已归档） | TASK_20260812_182 | bipay43147@barumart.com | model_2000.pt |
 | exp0.20 | 2026-08-12 | hip_yaw 目标改为 0 约束（default_joint_pos/joint_deviation_hip 重新纳入 hip_yaw，目标 0），其余保持 exp0.19 | 失败（步态仍退化+机器人转圈，CSV 已分析；反思脚朝向测量方式；视频已归档） | TASK_20260812_259 | limxmspwo8w3969eot@emalupe.com | model_3000.pt |
-| exp0.21 | 2026-08-13 | exp0.5 精确配置 + 真实脚朝向奖励（局部 +z 投影）+ 抬脚加强（clearance 1.5/feet_height 1.2/feet_yaw 2.0） | 训练中 | TASK_20260813_030 | limxmspwpf4mh2aijb@emalupe.com | - |
+| exp0.21 | 2026-08-13 | exp0.5 精确配置 + 真实脚朝向奖励（局部 +z 投影）+ 抬脚加强（clearance 1.5/feet_height 1.2/feet_yaw 2.0） | 失败（脚朝向修复成功但步态退化：周期 0.51s/步长 0.24m/步频 1.93；视频已归档） | TASK_20260813_030 | limxmspwpf4mh2aijb@emalupe.com | model_3000.pt |
+| exp0.22 | 2026-08-13 | exp0.21 基础上温和化：feet_yaw 2.0→1.0、clearance 1.5→1.2、feet_height 1.2→1.0，保持真实脚朝向测量 | 训练中 | - | limxmspwpf4mh2aijb@emalupe.com | - |
 
 
 ## 实验 exp0.17：固定相位期望 + exp0.3 基底 + 少量约束
@@ -2226,6 +2227,67 @@ foot_yaw_rel = (foot_yaw_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch
 - 抬脚 L/R ≥ 0.03m（重点右脚）；
 - 其余 6 项保持 exp0.5 达标水平（高度 ~0.60、速度 ~0.52、周期 0.59s、步频 1.67、步长 0.31、相位 0.35）。
 - 全部 12 子项达标即收尾；视频 + CSV 归档 `czy/data/exp0_21/`。
+
+### 7. 实验结果（TASK_20260813_069 play，model_3000）
+
+| 指标 | 值 | 目标 | 判定 |
+| --- | --- | --- | --- |
+| 高度 | 0.6022 | ~0.61m | ✅ |
+| 速度 | 0.4750 | ~0.5 | ✅ |
+| 周期 L/R | 0.5146/0.5187 | 0.55~0.85s | ❌ |
+| 步频 L/R | 1.9433/1.9280 | 1.2~1.8 | ❌ |
+| 步长 L/R | 0.2444/0.2463 | >=0.30m | ❌ |
+| 抬脚 L/R | 0.0170/0.0499 | >=0.03m | ❌/✅ |
+| 脚朝向 L/R | -0.0105/-0.0468 | ≈0 | ✅/✅ |
+| 相位 | 0.2129 | ~0.5 | ❌ |
+
+**结论**：脚朝向修复成功（右脚 -0.294 → -0.047，左脚 ≈0），证明真实脚朝向奖励（局部 +z 投影）有效；但 feet_yaw=2.0 权重过强，约束过度导致步态退化——周期变短（0.51s）、步长变小（0.24m）、步频升高（1.93）、左脚抬脚掉到 0.017、相位 0.21。4 项达标（高度/速度/脚朝向 L/R），8 项不达标。
+
+**教训**：真实测量使 feet_yaw 奖励首次有梯度生效，权重需回调；抬脚右达标（0.05）但左脚反降，说明抬脚加强 + 过强 yaw 约束干扰了对称步态。
+
+**下一步（exp0.22）**：feet_yaw 2.0 → 1.0（温和引导），feet_clearance 1.5 → 1.2、feet_height 1.2 → 1.0（适度抬脚），其余保持 exp0.5 精确配置，目标恢复周期/步长/步频并维持脚朝向。视频+CSV 已归档 `czy/data/exp0_21/`（play_output.mp4 23.3MB / isaac_diag.csv）。
+
+---
+
+## 实验 exp0.22：feet_yaw 温和化——修复 exp0.21 步态退化
+
+### 1. 上一实验结果与教训
+
+> exp0.21：真实脚朝向奖励（局部 +z 投影）修复脚朝向成功（右脚 -0.294 → -0.047），但 feet_yaw=2.0 权重过强，约束过度导致步态退化：周期 0.51s（目标 ≥0.55）、步长 0.24m（目标 ≥0.30）、步频 1.93（目标 ≤1.8）、左脚抬脚掉到 0.017（目标 ≥0.03）、相位 0.21（目标 0.5）。
+
+### 2. 本轮修改目标
+
+- feet_yaw 2.0 → 1.0（真实测量首次有梯度生效，温和引导即可）；
+- feet_clearance 1.5 → 1.2、feet_height 1.2 → 1.0（适度抬脚，避免干扰对称步态）；
+- 其余保持 exp0.5 精确配置，目标恢复周期/步长/步频/相位并维持脚朝向 ≈0。
+
+### 3. 修改内容
+
+- `humanoid/envs/x1/x1_dh_stand_config.py`：
+  - `feet_yaw` 2.0 → 1.0；
+  - `feet_clearance` 1.5 → 1.2；
+  - `feet_height` 1.2 → 1.0。
+
+### 4. 修改文件
+
+- `humanoid/envs/x1/x1_dh_stand_config.py`
+
+### 5. 训练参数
+
+| 参数 | 值 |
+| --- | --- |
+| Task ID | 待创建 |
+| 训练方式 | 从零 |
+| GM 账号 | limxmspwpf4mh2aijb |
+| max_iterations | 3000 |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+
+### 6. 预期与验收
+
+- 周期 L/R 回到 0.55~0.85s、步长 ≥0.30m、步频 1.2~1.8、相位 ~0.5；
+- 脚朝向 L/R ≈ 0（保持 exp0.21 的修复成果）；
+- 抬脚 L/R ≥ 0.03m；
+- 全部 12 子项达标即收尾；视频 + CSV 归档 `czy/data/exp0_22/`。
 
 
 
