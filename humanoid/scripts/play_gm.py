@@ -300,9 +300,16 @@ def play(args):
         base_yaw = torch.atan2(2.0 * (base_quat[3] * base_quat[2] + base_quat[0] * base_quat[1]),
                                1.0 - 2.0 * (base_quat[1] * base_quat[1] + base_quat[2] * base_quat[2]))
         diag["base_yaw"].append(base_yaw.item())
-        # 真实脚朝向：脚全局 yaw 相对 base yaw（feet_euler_xyz[:, :, 2]）
-        diag["foot_yaw_l"].append(env.feet_euler_xyz[0, 0, 2].item() - base_yaw.item())
-        diag["foot_yaw_r"].append(env.feet_euler_xyz[0, 1, 2].item() - base_yaw.item())
+        # 真实脚朝向：脚局部前向轴(+z，URDF 名义位姿 FK 验证：local_z≈base+X)投影到水平面的航向角，相对 base yaw
+        # 注：feet_euler_xyz[:,:,2] 因 ankle_roll_link rpy=(0,pi/2,0) 万向锁产生固定伪影(≈1.89/1.65 rad)，不可用
+        feet_quat = env.feet_quat  # (num_envs, num_feet, 4)
+        foot_local_z = torch.zeros(feet_quat.shape[:-1] + (3,), device=env.device)
+        foot_local_z[..., 2] = 1.0
+        foot_fwd = quat_rotate(feet_quat, foot_local_z)  # 脚前向轴在世界系
+        foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
+        foot_yaw_rel = wrap_to_pi(foot_yaw_world - base_yaw)
+        diag["foot_yaw_l"].append(foot_yaw_rel[0, 0].item())
+        diag["foot_yaw_r"].append(foot_yaw_rel[0, 1].item())
         diag["command_x"].append(env.commands[0, 0].item())
         diag["foot_z_l"].append(env.rigid_state[0, left_foot_idx, 2].item())
         diag["foot_z_r"].append(env.rigid_state[0, right_foot_idx, 2].item())

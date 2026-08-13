@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：exp0.20 CSV 已分析（不达标，且机器人转圈）；正在用真实 foot_yaw 重新验证 exp0.5 model_2300（TASK_20260812_302）——exp0.5 脚朝向可能是测量假阳性。
+> **当前状态**：已定位脚朝向测量根因（`feet_euler_xyz[:,:,2]` 因 ankle_roll_link rpy=(0,π/2,0) 万向锁产生固定伪影 ≈1.89/1.65 rad，不可用）；URDF FK 验证 X1 脚 link 前向轴为**局部 +z**（名义位姿下 ≈ base +X）；play_gm.py 已改用 `quat_rotate(feet_quat, [0,0,1])` 水平投影测量真实脚朝向。正在重新回放 exp0.5 model_2300 验证其是否实际达标。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -2084,5 +2084,63 @@ expected_phase = self.cycle_target * 0.5
 1. exp0.5 的"脚朝向 -0.254/0.066"是用 **hip_yaw 关节角**（dof_pos_2/8）量的，但 X1 的 hip_yaw 轴非竖直（origin rpy=(π/2,0,0)），关节角 ≠ 真实脚朝向——**exp0.5 的脚朝向可能实际上是达标的（假阳性）**！
 2. exp0.19（移除 hip_yaw 惩罚）和 exp0.20（hip_yaw 目标 0）都从零训练，步态反而退化，说明 hip_yaw 惩罚不是脚朝向的根因，**真正的问题是测量方式**。
 3. **下一步**：用真实 foot_yaw 字段重新回放 exp0.5 model_2300（TASK_20260812_302），验证 exp0.5 是否实际达标。若达标，则以 exp0.5 配置为基线，只针对真实脚朝向做小幅修正。
+
+---
+
+## 技术分析：脚朝向测量根因（feet_euler_xyz 万向锁伪影）
+
+> 时间：2026-08-13。此分析解释为什么此前所有 exp 的"脚朝向"指标（foot_yaw_l/r）都不可信，以及正确的测量方法。
+
+### 1. 现象
+
+- exp0.20 与 exp0.5_verify 两次完全不同的策略回放，`feet_euler_xyz[:,:,2] - base_yaw` 几乎相同：foot_yaw_l ≈ 1.8944 / 1.8945，foot_yaw_r ≈ -1.223 / -1.652。
+- 两个策略步态差异巨大，脚朝向不可能一致 → 该测量是**固定伪影**，不是真实脚朝向。
+
+### 2. 根因：ankle_roll_link 万向锁
+
+`X1_12DOF.urdf` 左腿链累计旋转（含默认关节角 hip_pitch=0.4, hip_roll=0.05, hip_yaw=-0.31, knee=0.49, ankle_pitch=-0.21）：
+
+| 关节 | origin rpy | axis |
+| --- | --- | --- |
+| left_hip_pitch | (0, -0.7854, 1.5708) | (0,0,1) |
+| left_hip_roll | (1.5708, 0.7854, 0) | (0,0,-1) |
+| left_hip_yaw | (1.5708, 0, 0) | (0,0,-1) |
+| left_knee_pitch | (-1.5708, 0, -1.5708) | (0,0,1) |
+| left_ankle_pitch | (-π, 0, π) | (0,0,-1) |
+| left_ankle_roll | **(0, π/2, 0)** | (0,0,1) |
+
+- 腿链含多个 π/2 量级的 rpy 旋转，特别是 **ankle_roll origin rpy=(0, π/2, 0)**（绕 y 轴 90°），使脚 link 局部系与全局系发生轴置换，`get_euler_rpy` 提取 yaw 时进入万向锁区域，输出固定偏置（≈1.89 rad），与关节实际姿态无关。
+
+### 3. FK 验证：脚 link 的正确前向轴
+
+`czy/foot_axis_calc.py` 计算 base_link → left/right_ankle_roll_link 累计旋转矩阵（名义位姿）：
+
+```
+LEFT foot  local_x -> base +Y(左), local_y -> +Z(上), local_z -> +X(前, -1.84°)
+RIGHT foot local_x -> base -Y(右), local_y -> -Z(下), local_z -> +X(前, +1.84°)
+```
+
+- **左右脚的前向轴都是局部 +z**（水平 yaw 与 base +X 偏差仅 ±1.8°，且来自默认 hip_yaw 的镜面对称，投影后不影响 yaw 测量）。
+- 局部 y 轴左右相反（左 +Z 上 / 右 -Z 下），印证右脚欧拉角伪影不同（1.65 vs 1.89）。
+
+### 4. 修复：play_gm.py 改用脚局部 +z 的水平投影
+
+```python
+feet_quat = env.feet_quat                       # (num_envs, num_feet, 4)
+foot_local_z = torch.zeros(feet_quat.shape[:-1] + (3,), device=env.device)
+foot_local_z[..., 2] = 1.0
+foot_fwd = quat_rotate(feet_quat, foot_local_z)  # 脚前向轴在世界系
+foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
+foot_yaw_rel = wrap_to_pi(foot_yaw_world - base_yaw)   # 相对 base 航向
+```
+
+- 已提交于 `humanoid/scripts/play_gm.py`（commit 待填）。
+- 注意：训练侧 `_reward_feet_yaw`（x1_dh_stand_env.py L647）仍用旧的 `feet_euler_xyz[:,:,2]`，若需真实脚朝向引导，后续重训时应同步改为局部 +z 投影。
+
+### 5. 下一步
+
+- 用修复后的 play_gm.py 重新回放 exp0.5 model_2300（真实 foot_yaw 落地验证）。
+- 若 exp0.5 实际达标（此前 7/8 项已达标，仅"脚朝向"可能假阳性）→ 以 exp0.5 配置为最终基线，无需重训。
+
 
 
