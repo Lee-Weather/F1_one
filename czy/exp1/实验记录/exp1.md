@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **目标**：无参考轨迹平地行走，全部指标达标（高度 ~0.61m、相位 ~0.5、步频 1.2~1.8、周期 0.55~0.85s、步长 >=0.30m、抬脚 >=0.03m、脚朝向 ≈0、速度 ≈0.5）。
-> **当前状态**：已定位脚朝向测量根因（`feet_euler_xyz[:,:,2]` 因 ankle_roll_link rpy=(0,π/2,0) 万向锁产生固定伪影 ≈1.89/1.65 rad，不可用）；URDF FK 验证 X1 脚 link 前向轴为**局部 +z**（名义位姿下 ≈ base +X）；play_gm.py 已改用 `quat_rotate(feet_quat, [0,0,1])` 水平投影测量真实脚朝向。正在重新回放 exp0.5 model_2300 验证其是否实际达标。
+> **当前状态**：已定位脚朝向测量根因（`feet_euler_xyz[:,:,2]` 因 ankle_roll_link rpy=(0,π/2,0) 万向锁产生固定伪影 ≈1.89/1.65 rad，不可用）；URDF FK 验证 X1 脚 link 前向轴为**局部 +z**（名义位姿下 ≈ base +X）；play_gm.py 已改用 `quat_rotate(feet_quat, [0,0,1])` 水平投影测量真实脚朝向。已提交修复（commit 940a540），play 验证任务 TASK_20260813_027（exp0.5 model_2300）已启动。
 > **产物规范**：`czy/data/{实验名}/` 下仅保留 pt/mp4/csv 三个文件。
 
 
@@ -2134,12 +2134,13 @@ foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
 foot_yaw_rel = wrap_to_pi(foot_yaw_world - base_yaw)   # 相对 base 航向
 ```
 
-- 已提交于 `humanoid/scripts/play_gm.py`（commit 待填）。
+- 已提交于 `humanoid/scripts/play_gm.py`（commit 940a540）。
 - 注意：训练侧 `_reward_feet_yaw`（x1_dh_stand_env.py L647）仍用旧的 `feet_euler_xyz[:,:,2]`，若需真实脚朝向引导，后续重训时应同步改为局部 +z 投影。
 
 ### 5. 下一步
 
 - 用修复后的 play_gm.py 重新回放 exp0.5 model_2300（真实 foot_yaw 落地验证）。
+- 验证任务：TASK_20260813_027（2026-08-13 08:16 启动，账号 limxmspwpf4mh2aijb）。
 - 若 exp0.5 实际达标（此前 7/8 项已达标，仅"脚朝向"可能假阳性）→ 以 exp0.5 配置为最终基线，无需重训。
 
 
