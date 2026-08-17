@@ -3,11 +3,11 @@
 ## 实验索引
 
 > **阶段目标**：验证 `czy/diff` 风格的有参考轨迹 X1 平地行走方案，解决无参考轨迹训练中出现的高频小碎步问题。
-> **当前状态**：训练任务 TASK_20260817_070 已创建并启动（13:48），等待 4090D 算力调度排队，尚未进入运行态。
+> **当前状态**：云平台 4090D 排队超 30 分钟未调度，已停止云端任务 TASK_20260817_070；改用远程服务器 10.12.201.5 训练（PID 2744613，run_name=exp1，14:37 启动，GPU 45%，ETA ~2.3h）。
 
 | 编号 | 日期 | 摘要 | 状态 | Task ID | GM账号 | checkpoint |
 | --- | --- | --- | --- | --- | --- | --- |
-| exp1 | 2026-08-17 | 恢复 diff 有参考轨迹 PPO，改为按平面速度自适应步态周期，并将左右膝关节物理阻尼设为 8.0，待训练验证 | 训练中（排队） | TASK_20260817_070 | limxmspwqm1g9hgfme@emalupe.com | 待训练 |
+| exp1 | 2026-08-17 | 恢复 diff 有参考轨迹 PPO，改为按平面速度自适应步态周期，并将左右膝关节物理阻尼设为 8.0，待训练验证 | 训练中（远程） | TASK_20260817_070（已停） | limxmspwqm1g9hgfme@emalupe.com | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
@@ -102,17 +102,19 @@
 
 | 参数 | 值 |
 | --- | --- |
-| 训练方式 | 从零 |
-| GM账号 | limxmspwqm1g9hgfme@emalupe.com |
+| 训练方式 | 从零（远程服务器） |
+| 远程主机 | 10.12.201.5，robot@，conda 环境 F1 |
+| 远程目录 | ~/czy/exp1/exp_20260817_142919/F1_one |
+| 训练 PID | 2744613（nohup，run_name=exp1） |
+| 云端 Task ID | TASK_20260817_070（已停止，4090D 排队未调度） |
 | max_iterations | 3000 |
 | save_interval | 100 |
 | num_envs | 4096 |
 | seed | 5 |
 | learning_rate | `1e-5` |
-| 算力 | 1x4090D 24G, ESKU000001, ¥5.4/h |
-| 镜像 | BJX00000001 (Isaac Gym preview-4), V000124 |
-| 代码仓库 | https://github.com/Lee-Weather/F1_one.git, main @ 0c53917 |
-| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=3000` |
+| 算力 | 远程服务器（A100 48G，单卡） |
+| 代码 | 本地 scp 传输（不含 skills/、czy/data/、.git） |
+| 启动命令 | `python humanoid/scripts/train.py --task=x1_dh_stand --run_name=exp1 --headless --max_iterations=3000` |
 
 ### 6. 预期与验收
 
