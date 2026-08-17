@@ -16,11 +16,14 @@ import math
 import shutil
 import numpy as np
 import cv2
-import torch
 from datetime import datetime
 
+# NOTE: isaacgym must be imported before torch, otherwise gymdeps raises
+# "PyTorch was imported before isaacgym modules".
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
+
+import torch
 
 from humanoid import LEGGED_GYM_ROOT_DIR
 from humanoid.envs import *
@@ -215,18 +218,18 @@ def play(args):
         diag["foot_force_l"].append(env.contact_forces[0, left_foot_idx, 2].item())
         diag["foot_force_r"].append(env.contact_forces[0, right_foot_idx, 2].item())
         # Real foot heading relative to base yaw (same convention as play_gm.py)
-        feet_quat = env.feet_quat
+        feet_quat = env.feet_quat  # (num_envs, num_feet, 4) wxyz
         fqw, fqx, fqy, fqz = feet_quat[..., 0:1], feet_quat[..., 1:2], feet_quat[..., 2:3], feet_quat[..., 3:4]
         foot_fwd_x = 2.0 * (fqx * fqz + fqw * fqy)
         foot_fwd_y = 2.0 * (fqy * fqz - fqw * fqx)
-        foot_fwd = torch.cat([foot_fwd_x, foot_fwd_y], dim=-1)
+        foot_fwd = torch.cat([foot_fwd_x, foot_fwd_y], dim=-1)  # (num_envs, num_feet, 2)
         base_quat = env.root_states[0, 3:7]
         base_yaw = torch.atan2(2.0 * (base_quat[3] * base_quat[2] + base_quat[0] * base_quat[1]),
                                1.0 - 2.0 * (base_quat[1] * base_quat[1] + base_quat[2] * base_quat[2]))
-        for f in range(2):
-            fy_world = torch.atan2(foot_fwd[f, 1], foot_fwd[f, 0])
-            fy_rel = (fy_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch.pi
-            diag["foot_yaw_l" if f == 0 else "foot_yaw_r"].append(fy_rel.item())
+        foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
+        foot_yaw_rel = (foot_yaw_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch.pi
+        diag["foot_yaw_l"].append(foot_yaw_rel[0, 0].item())
+        diag["foot_yaw_r"].append(foot_yaw_rel[0, 1].item())
         diag["dof_pos"].append(env.dof_pos[0].cpu().numpy().tolist())
         diag["dof_vel"].append(env.dof_vel[0].cpu().numpy().tolist())
         diag["dof_torque"].append(env.torques[0].cpu().numpy().tolist())
