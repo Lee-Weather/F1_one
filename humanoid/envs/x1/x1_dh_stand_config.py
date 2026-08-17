@@ -347,10 +347,12 @@ class X1DHStandCfg(LeggedRobotCfg):
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
             low_speed = 0.2
             track_vel_hard = 0.5
+            lateral_vel = 0.6  # exp1.1: penalize body-frame lateral velocity (crab-walk fix)
             # base pos
             default_joint_pos = 1.0
             orientation = 1.
             feet_rotation = 0.3
+            feet_yaw_align = 0.4  # exp1.1: penalize foot toe-out yaw relative to base
             base_height = 0.2
             base_acc = 0.2
             # energy

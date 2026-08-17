@@ -76,7 +76,8 @@ def save_diag_csv(diag, out_dir, num_actions=12, dt=0.02):
     os.makedirs(out_dir, exist_ok=True)
     csv_path = os.path.join(out_dir, "isaac_diag.csv")
     header = ["step", "time_s", "command_x", "base_vel_x", "base_vel_y", "base_vel_yaw",
-              "base_height", "foot_z_l", "foot_z_r", "foot_force_l", "foot_force_r",
+              "base_height", "base_pos_x", "base_pos_y", "base_yaw",
+              "foot_z_l", "foot_z_r", "foot_force_l", "foot_force_r",
               "foot_yaw_l", "foot_yaw_r"]
     header += [f"dof_pos_{i}" for i in range(num_actions)]
     header += [f"dof_vel_{i}" for i in range(num_actions)]
@@ -88,6 +89,7 @@ def save_diag_csv(diag, out_dir, num_actions=12, dt=0.02):
             row = [i, round(i * dt, 6), diag["command_x"][i],
                    diag["base_vel_x"][i], diag["base_vel_y"][i], diag["base_vel_yaw"][i],
                    diag["base_height"][i],
+                   diag["base_pos_x"][i], diag["base_pos_y"][i], diag["base_yaw"][i],
                    diag["foot_z_l"][i], diag["foot_z_r"][i],
                    diag["foot_force_l"][i], diag["foot_force_r"][i],
                    diag["foot_yaw_l"][i], diag["foot_yaw_r"][i]]
@@ -182,7 +184,8 @@ def play(args):
 
     # Per-step diagnostics
     diag = {k: [] for k in ["command_x", "base_vel_x", "base_vel_y", "base_vel_yaw",
-                            "base_height", "foot_z_l", "foot_z_r",
+                            "base_height", "base_pos_x", "base_pos_y", "base_yaw",
+                            "foot_z_l", "foot_z_r",
                             "foot_force_l", "foot_force_r", "foot_yaw_l", "foot_yaw_r",
                             "dof_pos", "dof_vel", "dof_torque"]}
 
@@ -213,6 +216,9 @@ def play(args):
         diag["base_vel_y"].append(env.base_lin_vel[0, 1].item())
         diag["base_vel_yaw"].append(env.base_ang_vel[0, 2].item())
         diag["base_height"].append(env.root_states[0, 2].item())
+        # World-frame base pose (for straight-line walking verification)
+        diag["base_pos_x"].append(env.root_states[0, 0].item())
+        diag["base_pos_y"].append(env.root_states[0, 1].item())
         diag["foot_z_l"].append(env.rigid_state[0, left_foot_idx, 2].item())
         diag["foot_z_r"].append(env.rigid_state[0, right_foot_idx, 2].item())
         diag["foot_force_l"].append(env.contact_forces[0, left_foot_idx, 2].item())
@@ -228,6 +234,7 @@ def play(args):
                                1.0 - 2.0 * (base_quat[1] * base_quat[1] + base_quat[2] * base_quat[2]))
         foot_yaw_world = torch.atan2(foot_fwd[..., 1], foot_fwd[..., 0])
         foot_yaw_rel = (foot_yaw_world - base_yaw + torch.pi) % (2.0 * torch.pi) - torch.pi
+        diag["base_yaw"].append(base_yaw.item())
         diag["foot_yaw_l"].append(foot_yaw_rel[0, 0].item())
         diag["foot_yaw_r"].append(foot_yaw_rel[0, 1].item())
         diag["dof_pos"].append(env.dof_pos[0].cpu().numpy().tolist())

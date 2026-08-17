@@ -848,8 +848,37 @@ class X1DHStandEnv(LeggedRobot):
         feet_euler_xyz = self.feet_euler_xyz
         rotation = torch.sum(torch.square(feet_euler_xyz[:,:,:2]),dim=[1,2])
         # rotation = torch.sum(torch.square(feet_euler_xyz[:,:,1]),dim=1)
-        r = torch.exp(-rotation*15)
+        # exp1.1: unsaturate (15 -> 5) so roll/pitch penalty actually contributes
+        r = torch.exp(-rotation*5)
         return r
+
+    def _reward_feet_yaw_align(self):
+        """exp1.1: penalize foot toe-out (yaw of foot forward axis relative to base yaw).
+
+        Uses hand-written quaternion rotation of the foot local forward axis
+        (see play_gm.py): euler yaw from feet_euler_xyz suffers gimbal-lock
+        artifacts (ankle_roll_link rpy=(0,pi/2,0)), and GM-mirror quat_rotate
+        is broken for (...,4) inputs.
+        """
+        q = self.feet_quat  # (num_envs, num_feet, 4) wxyz
+        qw = q[..., 0:1]
+        qx = q[..., 1:2]
+        qy = q[..., 2:3]
+        qz = q[..., 3:4]
+        # foot local +z axis rotated to world frame
+        fwd_x = 2.0 * (qx * qz + qw * qy)
+        fwd_y = 2.0 * (qy * qz - qw * qx)
+        foot_yaw = torch.atan2(fwd_y, fwd_x).squeeze(-1)  # (num_envs, num_feet)
+        base_quat = self.root_states[:, 3:7]
+        base_yaw = torch.atan2(2.0 * (base_quat[:, 3] * base_quat[:, 2] + base_quat[:, 0] * base_quat[:, 1]),
+                               1.0 - 2.0 * (base_quat[:, 1] * base_quat[:, 1] + base_quat[:, 2] * base_quat[:, 2]))
+        rel = foot_yaw - base_yaw.unsqueeze(-1)
+        rel = torch.atan2(torch.sin(rel), torch.cos(rel))  # wrap to [-pi, pi]
+        return torch.exp(-torch.abs(rel).sum(dim=1) * 10.0)
+
+    def _reward_lateral_vel(self):
+        """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
+        return torch.exp(-torch.abs(self.base_lin_vel[:, 1]) * 20.0)
 
     def _reward_dof_vel(self):
         """
