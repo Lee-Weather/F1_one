@@ -176,7 +176,30 @@ def run_mujoco(policy, cfg, env_cfg):
         q, dq, quat, v, omega, gvec, base_pos, foot_positions, foot_forces = get_obs(data,model)
         q = q[-env_cfg.env.num_actions:]
         dq = dq[-env_cfg.env.num_actions:]
-        
+
+        # Match the training command limits: forward <= 0.6 m/s, backward
+        # <= 0.4 m/s, and planar speed <= 0.6 m/s.
+        command_x = float(np.clip(
+            x_vel_cmd,
+            env_cfg.commands.ranges.lin_vel_x[0],
+            env_cfg.commands.ranges.lin_vel_x[1],
+        ))
+        command_y = float(np.clip(
+            y_vel_cmd,
+            env_cfg.commands.ranges.lin_vel_y[0],
+            env_cfg.commands.ranges.lin_vel_y[1],
+        ))
+        command_yaw = float(np.clip(
+            yaw_vel_cmd,
+            env_cfg.commands.ranges.ang_vel_yaw[0],
+            env_cfg.commands.ranges.ang_vel_yaw[1],
+        ))
+        planar_speed = math.sqrt(command_x ** 2 + command_y ** 2)
+        if planar_speed > env_cfg.rewards.cycle_speed_max:
+            scale = env_cfg.rewards.cycle_speed_max / planar_speed
+            command_x *= scale
+            command_y *= scale
+
         base_z = base_pos[2]
         foot_z = foot_positions
         foot_force_z = foot_forces
@@ -184,7 +207,7 @@ def run_mujoco(policy, cfg, env_cfg):
         if count_lowlevel % cfg.sim_config.decimation == 0:
             ####### for stand only #######
             if hasattr(env_cfg.commands,"sw_switch"):
-                vel_norm = np.sqrt(x_vel_cmd**2 + y_vel_cmd**2 + yaw_vel_cmd**2)
+                vel_norm = np.sqrt(command_x**2 + command_y**2 + command_yaw**2)
                 if env_cfg.commands.sw_switch and vel_norm <= env_cfg.commands.stand_com_threshold:
                     count_lowlevel = 0
                     
@@ -193,24 +216,40 @@ def run_mujoco(policy, cfg, env_cfg):
             eu_ang[eu_ang > math.pi] -= 2 * math.pi
 
             if env_cfg.env.num_commands == 5:
-                obs[0, 0] = math.sin(2 * math.pi * count_lowlevel * cfg.sim_config.dt  / env_cfg.rewards.cycle_time)
-                obs[0, 1] = math.cos(2 * math.pi * count_lowlevel * cfg.sim_config.dt  / env_cfg.rewards.cycle_time)
-                obs[0, 2] = x_vel_cmd * env_cfg.normalization.obs_scales.lin_vel
-                obs[0, 3] = y_vel_cmd * env_cfg.normalization.obs_scales.lin_vel
-                obs[0, 4] = yaw_vel_cmd * env_cfg.normalization.obs_scales.ang_vel
+                planar_speed = min(
+                    math.sqrt(command_x ** 2 + command_y ** 2),
+                    env_cfg.rewards.cycle_speed_max,
+                )
+                speed_ratio = planar_speed / env_cfg.rewards.cycle_speed_max
+                cycle_time = env_cfg.rewards.cycle_time_min + speed_ratio * (
+                    env_cfg.rewards.cycle_time_max - env_cfg.rewards.cycle_time_min
+                )
+                phase = count_lowlevel * cfg.sim_config.dt / cycle_time
+                obs[0, 0] = math.sin(2 * math.pi * phase)
+                obs[0, 1] = math.cos(2 * math.pi * phase)
+                obs[0, 2] = command_x * env_cfg.normalization.obs_scales.lin_vel
+                obs[0, 3] = command_y * env_cfg.normalization.obs_scales.lin_vel
+                obs[0, 4] = command_yaw * env_cfg.normalization.obs_scales.ang_vel
             if env_cfg.env.num_commands == 3:
-                obs[0, 0] = x_vel_cmd * env_cfg.normalization.obs_scales.lin_vel
-                obs[0, 1] = y_vel_cmd * env_cfg.normalization.obs_scales.lin_vel
-                obs[0, 2] = yaw_vel_cmd * env_cfg.normalization.obs_scales.ang_vel
+                obs[0, 0] = command_x * env_cfg.normalization.obs_scales.lin_vel
+                obs[0, 1] = command_y * env_cfg.normalization.obs_scales.lin_vel
+                obs[0, 2] = command_yaw * env_cfg.normalization.obs_scales.ang_vel
             obs[0, env_cfg.env.num_commands:env_cfg.env.num_commands+env_cfg.env.num_actions] = (q - cfg.robot_config.default_dof_pos) * env_cfg.normalization.obs_scales.dof_pos
             obs[0, env_cfg.env.num_commands+env_cfg.env.num_actions:env_cfg.env.num_commands+2*env_cfg.env.num_actions] = dq * env_cfg.normalization.obs_scales.dof_vel
             obs[0, env_cfg.env.num_commands+2*env_cfg.env.num_actions:env_cfg.env.num_commands+3*env_cfg.env.num_actions] = action
             obs[0, env_cfg.env.num_commands+3*env_cfg.env.num_actions:env_cfg.env.num_commands+3*env_cfg.env.num_actions+3] = omega
             obs[0, env_cfg.env.num_commands+3*env_cfg.env.num_actions+3:env_cfg.env.num_commands+3*env_cfg.env.num_actions+6] = eu_ang
             if getattr(env_cfg.env, 'add_phase_obs', False) and env_cfg.env.num_single_obs >= 49:
-                period = env_cfg.rewards.cycle_time_target
-                phase = (count_lowlevel * cfg.sim_config.dt) % period
-                phase_angle = phase / period * 2.0 * math.pi
+                planar_speed = min(
+                    math.sqrt(command_x ** 2 + command_y ** 2),
+                    env_cfg.rewards.cycle_speed_max,
+                )
+                speed_ratio = planar_speed / env_cfg.rewards.cycle_speed_max
+                cycle_time = env_cfg.rewards.cycle_time_min + speed_ratio * (
+                    env_cfg.rewards.cycle_time_max - env_cfg.rewards.cycle_time_min
+                )
+                phase_angle = (count_lowlevel * cfg.sim_config.dt / cycle_time) % 1.0
+                phase_angle *= 2.0 * math.pi
                 obs[0, 45] = math.sin(phase_angle)
                 obs[0, 46] = math.cos(phase_angle)
                 obs[0, 47] = math.sin(phase_angle + math.pi)
@@ -218,11 +257,11 @@ def run_mujoco(policy, cfg, env_cfg):
             
             ####### for stand only #######
             if env_cfg.env.add_stand_bool:
-                vel_norm = np.sqrt(x_vel_cmd**2 + y_vel_cmd**2 + yaw_vel_cmd**2)
+                vel_norm = np.sqrt(command_x**2 + command_y**2 + command_yaw**2)
                 stand_command = (vel_norm <= env_cfg.commands.stand_com_threshold)
                 obs[0, -1] = stand_command
             
-            print(x_vel_cmd, y_vel_cmd, yaw_vel_cmd)
+            print(command_x, command_y, command_yaw)
 
             obs = np.clip(obs, -env_cfg.normalization.clip_observations, env_cfg.normalization.clip_observations)
 
@@ -260,12 +299,12 @@ def run_mujoco(policy, cfg, env_cfg):
                     'foot_forcez_l': foot_force_z[0],
                     'foot_forcez_r': foot_force_z[1],
                     'base_vel_x': v[0],
-                    'command_x': x_vel_cmd,
+                    'command_x': command_x,
                     'base_vel_y': v[1],
-                    'command_y': y_vel_cmd,
+                    'command_y': command_y,
                     'base_vel_z': v[2],
                     'base_vel_yaw': omega[2],
-                    'command_yaw': yaw_vel_cmd,
+                    'command_yaw': command_yaw,
                     'dof_pos_target': dof_pos_target[idx],
                     'dof_pos': q[idx],
                     'dof_vel': dq[idx],
@@ -339,4 +378,3 @@ if __name__ == '__main__':
 
     run_mujoco(policy, Sim2simCfg(), env_cfg)
 
-    

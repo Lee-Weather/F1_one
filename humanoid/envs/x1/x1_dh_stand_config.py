@@ -41,16 +41,16 @@ class X1DHStandCfg(LeggedRobotCfg):
         frame_stack = 66      #all histroy obs num
         short_frame_stack = 5   #short history step
         c_frame_stack = 3  #all histroy privileged obs num
-        num_single_obs = 49
+        num_single_obs = 47
         num_observations = int(frame_stack * num_single_obs)
-        single_num_privileged_obs = 57
-        single_linvel_index = 39
+        single_num_privileged_obs = 73
+        single_linvel_index = 53
         num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
         num_actions = 12
         num_envs = 4096
         episode_length_s = 24 #episode length in seconds
-        num_commands = 3 # vx vy vyaw
-        add_phase_obs = True
+        use_ref_actions = False
+        num_commands = 5 # sin_pos cos_pos vx vy vz
 
     class safety:
         # safety factors
@@ -60,6 +60,8 @@ class X1DHStandCfg(LeggedRobotCfg):
 
 
     class asset(LeggedRobotCfg.asset):
+        # The diff snapshot referenced an older asset name that is not present
+        # in this workspace; keep the current X1 12-DOF asset path.
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/x1/urdf/X1_12DOF.urdf'
         xml_file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/x1/mjcf/xyber_x1_flat.xml'
 
@@ -223,20 +225,20 @@ class X1DHStandCfg(LeggedRobotCfg):
 
         randomize_joint_damping = True
         randomize_joint_damping_each_joint = False
-        initial_joint_damping = [2.0, 2.0, 2.0, 1.5, 0.5, 0.5, 2.0, 2.0, 2.0, 1.5, 0.5, 0.5]
-        joint_damping_range = [0.8, 1.2]       # global fallback (each_joint=False uses this)
-        joint_1_damping_range = [0.8, 1.2]
-        joint_2_damping_range = [0.8, 1.2]
-        joint_3_damping_range = [0.8, 1.2]
-        joint_4_damping_range = [0.8, 1.2]
-        joint_5_damping_range = [0.8, 1.2]
-        joint_6_damping_range = [0.8, 1.2]
-        joint_7_damping_range = [0.8, 1.2]
-        joint_8_damping_range = [0.8, 1.2]
-        joint_9_damping_range = [0.8, 1.2]
-        joint_10_damping_range = [0.8, 1.2]
-        joint_11_damping_range = [0.8, 1.2]
-        joint_12_damping_range = [0.8, 1.2]
+        # Keep the workspace's explicit URDF damping override; this is
+        # orthogonal to the reference-trajectory policy design.
+        initial_joint_damping = [2.0, 2.0, 2.0, 8.0, 0.5, 0.5, 2.0, 2.0, 2.0, 8.0, 0.5, 0.5]
+        joint_damping_range = [0.3, 1.5]
+        joint_1_damping_range = [0.3, 1.5]
+        joint_2_damping_range = [0.3, 1.5]
+        joint_3_damping_range = [0.3, 1.5]
+        joint_4_damping_range = [0.9, 1.5]
+        joint_5_damping_range = [0.9, 1.5]
+        joint_6_damping_range = [0.3, 1.5]
+        joint_7_damping_range = [0.3, 1.5]
+        joint_8_damping_range = [0.3, 1.5]
+        joint_9_damping_range = [0.9, 1.5]
+        joint_10_damping_range = [0.9, 1.5]
 
         randomize_joint_armature = True
         randomize_joint_armature_each_joint = False
@@ -280,8 +282,10 @@ class X1DHStandCfg(LeggedRobotCfg):
         joint_viscous_range = [0.05, 0.1]
         
     class commands(LeggedRobotCfg.commands):
-        curriculum = True
-        max_curriculum = 1.5
+        # Keep commands inside the adaptive-cycle range: forward <= 0.6 m/s
+        # and backward <= 0.4 m/s.
+        curriculum = False
+        max_curriculum = 0.6
         # Vers: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         num_commands = 4
         resampling_time = 25.  # time before command are changed[s]
@@ -298,7 +302,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         sw_switch = True # use stand_com_threshold or not
 
         class ranges:
-            lin_vel_x = [-0.4, 1.2] # min max [m/s] 
+            lin_vel_x = [-0.4, 0.6] # backward/forward limits [m/s]
             lin_vel_y = [-0.4, 0.4]   # min max [m/s]
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
             heading = [-3.14, 3.14]
@@ -308,74 +312,54 @@ class X1DHStandCfg(LeggedRobotCfg):
         soft_dof_vel_limit = 0.9
         soft_torque_limit = 0.9
         base_height_target = 0.61
-        base_height_sigma = 0.05
         foot_min_dist = 0.2
         foot_max_dist = 1.0
 
-        target_feet_height = 0.05
-        target_feet_height_max = 0.08
+        # final_swing_joint_pos = final_swing_joint_delta_pos + default_pos
+        final_swing_joint_delta_pos = [0.25, 0.05, -0.11, 0.35, -0.16, 0.0, -0.25, -0.05, 0.11, 0.35, -0.16, 0.0]
+        target_feet_height = 0.03
+        target_feet_height_max = 0.06
         feet_to_ankle_distance = 0.041
+        # Adaptive cycle: 0.35 s at standstill to 0.7 s at 0.6 m/s.
+        cycle_speed_max = 0.6  # [m/s], walking-speed upper bound
+        cycle_time_min = 0.35  # [s], low-speed lower bound
+        cycle_time_max = 0.7   # [s], maximum cycle at 0.6 m/s
         # if true negative total rewards are clipped at zero (avoids early termination problems)
         only_positive_rewards = True
         # tracking reward = exp(-error*sigma)
         tracking_sigma = 5 
         max_contact_force = 700  # forces above this value are penalized
-        cycle_time_target = 0.7
-        cycle_time_sigma = 0.1
-        cycle_window = 0.15
-        cycle_curriculum_start = 0.35
-        cycle_curriculum_end = 0.7
-        cycle_curriculum_steps = 50000
-        swing_time_target = 0.25
-        swing_time_sigma = 0.06
-        min_swing_time = 0.15
-        stride_length_min = 0.20
-        stride_length_max = 0.35
-        foot_yaw_sigma = 0.15
-        swing_symmetry_sigma = 0.08
-        phase_offset_sigma = 0.1
         
         class scales:
-            feet_clearance = 1.2
+            ref_joint_pos = 2.2
+            feet_clearance = 1.
+            feet_contact_number = 2.0
             # gait
-            feet_air_time = 3.0
-            step_cycle = 4.0
-            feet_height = 1.0
-            stride_length = 3.0
-            foot_slip = -0.2
+            feet_air_time = 1.2
+            foot_slip = -0.1
             feet_distance = 0.2
             knee_distance = 0.2
             # contact
             feet_contact_forces = -0.01
-            flight_penalty = -2.0
-            feet_stumble = -0.5
             # vel tracking
-            tracking_lin_vel = 2.0
+            tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
-            low_speed = 0.5
-            track_vel_hard = 0.6
+            low_speed = 0.2
+            track_vel_hard = 0.5
             # base pos
             default_joint_pos = 1.0
             orientation = 1.
             feet_rotation = 0.3
-            base_height = 1.0
-            knee_extension = 0.6
-            joint_deviation_hip = -0.5
-            joint_deviation_legs = -0.05
-            feet_yaw = 1.0
-            swing_symmetry = 1.5
-            phase_offset = 1.5
+            base_height = 0.2
             base_acc = 0.2
-            upward = 0.5
             # energy
-            action_smoothness = -0.01
+            action_smoothness = -0.002
             torques = -8e-9
             dof_vel = -2e-8
-            dof_acc = -3e-7
+            dof_acc = -1e-7
             collision = -1.
-            stand_still = 2.0
-            termination = -2.0
+            stand_still = 2.5
             # limits
             dof_vel_limits = -1
             dof_pos_limits = -10.
@@ -411,9 +395,9 @@ class X1DHStandCfgPPO(LeggedRobotCfgPPO):
         in_channels = X1DHStandCfg.env.frame_stack
 
     class algorithm(LeggedRobotCfgPPO.algorithm):
-        entropy_coef = 0.01
-        learning_rate = 1e-3
-        num_learning_epochs = 5
+        entropy_coef = 0.001
+        learning_rate = 1e-5
+        num_learning_epochs = 2
         gamma = 0.994
         lam = 0.9
         num_mini_batches = 4
