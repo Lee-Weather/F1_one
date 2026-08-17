@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+if (process.env.LIMX_ALLOW_INSECURE_TLS === '1') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
 
 const crypto = require('crypto');
+const {
+  DEFAULT_CREDENTIALS_FILE,
+  readGithubCredentials,
+  configureGithub
+} = require('./github-config');
 
 const BASE = 'https://internal.limxdynamics.com/dev-api/api';
 const MAIL_API = 'https://api.mail.tm';
@@ -16,7 +23,9 @@ function parseArgs(argv) {
     timeoutMs: 180000,
     intervalMs: 5000,
     keyName: 'cli-key',
-    createCliKey: false
+    createCliKey: false,
+    configureGithub: false,
+    githubCredentialsFile: DEFAULT_CREDENTIALS_FILE
   };
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -26,6 +35,11 @@ function parseArgs(argv) {
     else if (arg === '--interval') args.intervalMs = Number(argv[++i]) * 1000 || 5000;
     else if (arg === '--create-cli-key') args.createCliKey = true;
     else if (arg === '--key-name') args.keyName = argv[++i] || 'cli-key';
+    else if (arg === '--configure-github') args.configureGithub = true;
+    else if (arg === '--github-credentials') {
+      args.githubCredentialsFile = argv[++i] || DEFAULT_CREDENTIALS_FILE;
+      args.configureGithub = true;
+    }
     else if (arg === '--help') args.help = true;
   }
   return args;
@@ -108,7 +122,6 @@ async function createCliKey(token, name) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ name })
   });
-  console.log('createApiKey:', JSON.stringify(res.json));
   const payload = res.json && (res.json.data || res.json);
   const apiKey = payload && (payload.key || payload.apiKey);
   if (!apiKey) throw new Error('创建 CLI key 失败: ' + JSON.stringify(res.json));
@@ -118,9 +131,13 @@ async function createCliKey(token, name) {
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
-    console.log('用法: node scripts/register-account.js [--password <密码>] [--create-cli-key] [--key-name <key名称>] [--dry-run] [--timeout <秒>] [--interval <秒>]');
+    console.log('用法: node scripts/register-account.js [--password <密码>] [--create-cli-key] [--key-name <key名称>] [--configure-github] [--github-credentials <path>] [--dry-run] [--timeout <秒>] [--interval <秒>]');
     return;
   }
+
+  const githubCredentials = args.configureGithub
+    ? readGithubCredentials(args.githubCredentialsFile)
+    : null;
 
   const email = await createTempEmail();
   console.log('临时邮箱:', email);
@@ -185,11 +202,15 @@ async function main() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: email, password: md5(args.password), autoLogin: true })
   });
-  console.log('login:', JSON.stringify(login.json));
+  console.log('login: HTTP ' + login.status);
 
   const credential = { email, password: args.password, loginCode: login.json && login.json.code };
+  const loginToken = login.json && login.json.token;
+  if (args.configureGithub) {
+    if (!loginToken) throw new Error('登录 token 缺失，无法配置 GitHub 信息');
+    credential.github = await configureGithub(BASE, loginToken, githubCredentials, jsonFetch);
+  }
   if (args.createCliKey) {
-    const loginToken = login.json && login.json.token;
     if (!loginToken) throw new Error('登录 token 缺失，无法创建 CLI key');
     const keyInfo = await createCliKey(loginToken, args.keyName);
     credential.apiKey = keyInfo.apiKey;

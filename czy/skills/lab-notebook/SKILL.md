@@ -309,24 +309,3 @@ exp{阶段}.{尝试}    或    exp{阶段}（阶段首次尝试可省略 .1）
 | `isaac_diag.csv` | play 回放诊断 CSV |
 
 禁止在该目录存放 `model_isaac_csv.pt`、分析 PNG、日志等额外文件。分析图/临时打包文件如需保留，放 `czy/analysis/` 或项目外目录。
-
----
-
-## 九、Git 提交与双远程同步规范
-
-> **每次代码/文档变更提交后，必须按顺序推送到两个远程：先推 GitHub（origin），再同步推 GitLab（gitlab）。**
-
-本项目配置了两个远程仓库：
-
-- `origin`：`https://github.com/Lee-Weather/F1_one.git`（GitHub）
-- `gitlab`：`https://itools.weichai.com/git/cuizeyu/f1_one.git`（GitLab）
-
-### 提交与推送流程（Agent 必须遵守）
-
-1. 修改完成后先 `git status` / `git diff` 确认改动范围，仅 add 相关文件（禁止 `git add -A`）。
-2. 提交：`git commit -m "<描述>"`
-3. **先推 GitHub**：`git push origin main`
-4. **再同步推 GitLab**：`git push gitlab main`
-   - 仅在 origin 推送成功后再推 gitlab，确保两边一致。
-   - 若 gitlab 推送被拒绝（非快进），先 `git fetch gitlab` 查看差异，再决定合并或与用户确认；禁止盲目 force push（GitLab 的 main 为受保护分支，force push 会被拒绝）。
-5. 推送完成后确认两边一致：`git log --oneline -1 origin/main gitlab/main`

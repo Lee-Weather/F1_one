@@ -1,6 +1,6 @@
 ---
 name: register-limxdynamics-account
-description: 在 internal.limxdynamics.com 注册新账号并获取 CLI key：用临时邮箱接收 4 位验证码、设置密码、登录后创建 CLI key，返回账号密码和完整 key。当用户要求注册、创建或自动注册 Limx Dynamics 账号，或需要创建、获取 CLI key、API key 时使用本技能。
+description: 在 internal.limxdynamics.com 注册新账号、配置账号中心 GitHub 信息并获取 CLI key：用临时邮箱接收 4 位验证码、设置密码、登录后配置 Git 信息并创建 CLI key。当用户要求注册、创建或自动注册 Limx Dynamics 账号，配置 GitHub 用户名和 Token，或需要创建、获取 CLI key、API key 时使用本技能。
 ---
 
 # 注册 Limx Dynamics 账号并获取 CLI Key
@@ -65,8 +65,40 @@ node scripts/create-cli-key.js --email <账号> --password <密码> --name <key 
 - CLI key 创建后完整 key 只返回一次，必须立即保存。
 - 临时邮箱会过期；注册成功后提醒用户保存账号，如需接收后续验证邮件应把账号邮箱改成真实邮箱。
 - 仅在用户有权注册或允许自动注册的系统中执行，不绕过图形验证码或网站风控。
+- 默认启用 HTTPS 证书校验；只有内部环境明确需要时才设置 `LIMX_ALLOW_INSECURE_TLS=1`。
+
+## GitHub 配置
+
+账号中心 `https://internal.limxdynamics.com/account/center` 的 Git 信息保存接口为：
+
+```text
+POST /dev-api/api/user/editGitInfo
+Authorization: Bearer <LimX 登录 token>
+```
+
+请求体使用 `github_name` 和 `github_token`。注册账号并登录成功后，使用
+`--configure-github` 启用自动配置；也可以通过 `--github-credentials <path>` 指定凭据文件，
+默认读取 `E:\X1\仓库之外\github_credentials.json`，格式为：
+
+```json
+{
+  "github_name": "<GitHub 用户名>",
+  "github_token": "<GitHub Token>"
+}
+```
+
+示例：
+
+```bash
+node scripts/register-account.js --password <密码> --create-cli-key --configure-github
+node scripts/create-cli-key.js --email <账号> --password <密码> --configure-github
+```
+
+GitHub Token 只发送到账号中心接口，不写入任务 JSON、不在终端输出，也不提交到仓库。
+脚本输出只包含配置成功标记、GitHub 用户名和凭据文件路径。
 
 ## 资源
 
-- `scripts/register-account.js`：注册账号，支持 `--create-cli-key` 自动创建 CLI key，`--dry-run` 只测试到发送验证码。
-- `scripts/create-cli-key.js`：为已有账号创建 CLI key。
+- `scripts/register-account.js`：注册账号，支持 `--create-cli-key` 自动创建 CLI key、`--configure-github` 自动配置 GitHub 信息，`--dry-run` 只测试到发送验证码。
+- `scripts/create-cli-key.js`：为已有账号创建 CLI key，也支持更新该账号的 GitHub 信息。
+- `scripts/github-config.js`：读取外部 GitHub 凭据并调用账号中心 Git 配置接口。
