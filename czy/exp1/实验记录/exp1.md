@@ -182,3 +182,13 @@
 4. 原有 `tracking_lin_vel`/`tracking_sigma`/观测架构/网络结构全部不动，避免影响已收敛的前向跟踪与部署链路。
 5. 训练配置不变（3000 iter，10.12.201.5，run_name=exp1.1）。
 6. **验证**：play_adaptive 回放 + analyze_diag/analyze_drift——vy bias、路径-机身夹角、脚 yaw 外八、0.6 段无 reset，全量对照 exp1 表格记录。
+
+### 8. exp1.1 启动记录（2026-08-17 18:30）
+
+| 参数 | 值 |
+| --- | --- |
+| 代码提交 | `5c6ca03`（含 lateral_vel/feet_yaw_align 奖励、feet_rotation 去饱和） |
+| 远程目录 | ~/czy/exp1/exp_20260817_183000/F1_one（git archive 干净部署，无 skills/czy/data） |
+| 训练 PID | 2804864（nohup，run_name=exp1.1，max_iterations=3000） |
+| 启动验证 | 进程存活，GPU 8948MiB/41%，日志含 rew_lateral_vel / rew_feet_yaw_align 项 ✅ |
+| 预计耗时 | ~2.3h（ETA 8443s） |
