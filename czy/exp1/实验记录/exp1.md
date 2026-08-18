@@ -10,7 +10,7 @@
 | exp1 | 2026-08-17 | 恢复 diff 有参考轨迹 PPO，按平面速度自适应步态周期 | ✅ 完成（周期自适应验证通过；发现严重右偏螃蟹步 -34°） | TASK_20260817_070（已停，改远程） | limxmspwqm1g9hgfme@emalupe.com | czy/data/exp1/model.pt |
 | exp1.1 | 2026-08-17 | 新增 lateral_vel(0.6)+feet_yaw_align(0.4) 奖励修螃蟹步 | ✅ 完成（螃蟹步根治 +4.2°；代价：降速摔倒、前向跟踪 -22%） | —（远程 10.12.201.5） | — | czy/data/exp1.1/model.pt |
 | exp1.2 | 2026-08-18 | resampling 10s 变速训练 + 周期 EMA + 奖励再平衡 | ❌ 完成（懒惰坍缩：全程站立 vx≈0；发现 track_vel_hard 负值深坑） | TASK_20260818_028 | limxmspwqm1g9hgfme@emalupe.com | czy/data/exp1.2/model.pt |
-| exp1.3 | 2026-08-18 | 单变量回滚奖励（0.6/0.5），保留 resampling 10s + EMA | 训练中 | 待启动 | limxmspwqm1g9hgfme@emalupe.com | 待训练 |
+| exp1.3 | 2026-08-18 | 单变量回滚奖励（0.6/0.5），保留 resampling 10s + EMA | 训练中 | TASK_20260818_127 | limxmspwrri0bqyuxd@emalupe.com（账号池轮换，userId 4207） | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
