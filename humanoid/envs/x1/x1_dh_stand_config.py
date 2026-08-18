@@ -345,7 +345,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
-            low_speed = 0.2
+            low_speed = 0.5  # exp1.4: 0.2->0.5 to curb acceleration overshoot (exp1.3 fell at 1.43m/s)
             track_vel_hard = 0.5  # exp1.3: rollback exp1.2's 1.0 (negative-value pit encouraged lazy standing)
             lateral_vel = 0.6  # exp1.3: rollback exp1.2's 0.4 (exp1.1-proven config that walks)
             # base pos

@@ -840,6 +840,7 @@ class X1DHStandEnv(LeggedRobot):
 
         reward = torch.zeros_like(actual_speed)
         reward[speed_too_low] = -1.0
+        reward[speed_too_high] = -1.0  # exp1.4: overspeed was free (0), caused 1.43m/s runaway falls
         reward[speed_desired] = 1.2
         reward[direction_mismatch] = -2.0
         return reward * active_command
