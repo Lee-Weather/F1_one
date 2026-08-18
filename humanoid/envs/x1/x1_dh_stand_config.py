@@ -346,8 +346,8 @@ class X1DHStandCfg(LeggedRobotCfg):
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
             low_speed = 0.2
-            track_vel_hard = 1.0  # exp1.2: 0.5->1.0 to counter forward-tracking loss
-            lateral_vel = 0.4  # exp1.1: penalize body-frame lateral velocity; exp1.2: 0.6->0.4 to restore stride drive
+            track_vel_hard = 0.5  # exp1.3: rollback exp1.2's 1.0 (negative-value pit encouraged lazy standing)
+            lateral_vel = 0.6  # exp1.3: rollback exp1.2's 0.4 (exp1.1-proven config that walks)
             # base pos
             default_joint_pos = 1.0
             orientation = 1.
