@@ -14,6 +14,8 @@ import glob
 import csv
 import math
 import shutil
+import base64
+import subprocess
 import numpy as np
 import cv2
 from datetime import datetime
@@ -47,6 +49,7 @@ TOTAL_STEPS = sum(steps for steps, _ in VEL_PROFILE)
 RENDER = True
 FIX_COMMAND = True
 CONTACT_THRESHOLD_N = 1.0
+CHECKPOINT_URL = None  # set from --checkpoint_url_b64 in __main__ (cloud replay mode)
 
 
 def current_command(step_idx):
@@ -69,6 +72,63 @@ def find_latest_checkpoint():
         key=os.path.getmtime,
     )
     return models[-1] if models else None
+
+
+def extract_checkpoint_url_b64(argv):
+    """Pop --checkpoint_url_b64=<url-safe-b64> from argv (unknown to get_args)."""
+    prefix = "--checkpoint_url_b64="
+    for i, a in enumerate(argv):
+        if a.startswith(prefix):
+            argv.pop(i)
+            padded = a[len(prefix):]
+            padded += "=" * (-len(padded) % 4)
+            return base64.urlsafe_b64decode(padded).decode("utf-8")
+    return None
+
+
+def download_checkpoint(url):
+    """Download checkpoint from a signed OSS URL into logs/x1_dh_stand/gm_play/."""
+    download_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "x1_dh_stand", "gm_play")
+    os.makedirs(download_dir, exist_ok=True)
+    name = "model_downloaded.pt"
+    # recover original filename when guessable
+    from urllib.parse import unquote, urlparse
+    path = unquote(urlparse(url).path)
+    if "model_" in path and path.endswith(".pt"):
+        name = path.rsplit("/", 1)[-1]
+    download_path = os.path.join(download_dir, name)
+    print(f"[play_adaptive] Downloading checkpoint from OSS -> {download_path}")
+    try:
+        result = subprocess.run(
+            ["curl", "-L", "--retry", "3", "-o", download_path, url],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0 and os.path.exists(download_path) and os.path.getsize(download_path) > 1_000_000:
+            print(f"[play_adaptive] Downloaded {os.path.getsize(download_path)} bytes")
+            return download_path
+        print(f"[play_adaptive] Download failed: rc={result.returncode} {result.stderr[:200]}")
+    except Exception as e:
+        print(f"[play_adaptive] Download error: {e}")
+    return None
+
+
+def package_artifacts_for_upload(video_path, csv_path):
+    """Package video+csv as PTs into logs/x1_dh_stand/gm_play/ so the GM SDK
+    uploads them (see czy/skills/flux-cli/references/replay.md)."""
+    try:
+        upload_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "x1_dh_stand", "gm_play")
+        os.makedirs(upload_dir, exist_ok=True)
+        import torch as _torch
+        with open(video_path, "rb") as f:
+            vp = os.path.join(upload_dir, "model_isaac_video.pt")
+            _torch.save({"bytes": f.read(), "filename": os.path.basename(video_path)}, vp)
+            print(f"[play_adaptive] Packaged video PT -> {vp}")
+        with open(csv_path, "rb") as f:
+            cp = os.path.join(upload_dir, "model_isaac_csv.pt")
+            _torch.save({"bytes": f.read(), "filename": os.path.basename(csv_path)}, cp)
+            print(f"[play_adaptive] Packaged csv PT -> {cp}")
+    except Exception as e:
+        print(f"[play_adaptive] Artifact packaging skipped: {e}")
 
 
 def save_diag_csv(diag, out_dir, num_actions=12, dt=0.02):
@@ -125,14 +185,18 @@ def play(args):
     env_cfg.noise.curriculum = False
     train_cfg.seed = 12345
 
-    # Locate checkpoint
+    # Locate checkpoint: explicit --load_run/--checkpoint > --checkpoint_url_b64 download > latest local
     if args.load_run and args.checkpoint:
         train_cfg.runner.resume = True
         train_cfg.runner.load_run = args.load_run
         train_cfg.runner.checkpoint = args.checkpoint
         print(f"[play_adaptive] Using explicit load_run={args.load_run} checkpoint={args.checkpoint}")
     else:
-        ckpt = find_latest_checkpoint()
+        ckpt = None
+        if CHECKPOINT_URL:
+            ckpt = download_checkpoint(CHECKPOINT_URL)
+        if ckpt is None:
+            ckpt = find_latest_checkpoint()
         if ckpt is None:
             print("[play_adaptive] ERROR: no checkpoint under logs/x1_dh_stand/exported_data")
             sys.exit(1)
@@ -300,7 +364,17 @@ def play(args):
     print(f"  Video: {video_path}")
     print(f"  CSV:   {csv_path}")
 
+    # Cloud mode: package artifacts so the GM SDK uploads them
+    if CHECKPOINT_URL:
+        package_artifacts_for_upload(video_path, csv_path)
+        print("[play_adaptive] Keeping artifacts for SDK upload (60s)...")
+        import time
+        time.sleep(60)
+
 
 if __name__ == "__main__":
+    globals()["CHECKPOINT_URL"] = extract_checkpoint_url_b64(sys.argv)
+    if CHECKPOINT_URL:
+        print("[play_adaptive] Cloud mode: will download checkpoint from signed URL")
     args = get_args()
     play(args)
