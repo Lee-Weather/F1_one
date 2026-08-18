@@ -88,15 +88,18 @@ def extract_checkpoint_url_b64(argv):
 
 
 def download_checkpoint(url):
-    """Download checkpoint from a signed OSS URL into logs/x1_dh_stand/gm_play/."""
+    """Download checkpoint from a signed OSS URL into logs/x1_dh_stand/gm_play/.
+
+    The OSS filename carries a timestamp suffix (model_5000_2026...A845.pt); the
+    runner later reassembles model_<N>.pt from the checkpoint number, so save
+    under the normalized name."""
     download_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", "x1_dh_stand", "gm_play")
     os.makedirs(download_dir, exist_ok=True)
-    name = "model_downloaded.pt"
-    # recover original filename when guessable
     from urllib.parse import unquote, urlparse
     path = unquote(urlparse(url).path)
-    if "model_" in path and path.endswith(".pt"):
-        name = path.rsplit("/", 1)[-1]
+    base = path.rsplit("/", 1)[-1] if "/" in path else path
+    m = re.match(r"model_(\d+)", base)
+    name = f"model_{m.group(1)}.pt" if m else "model_downloaded.pt"
     download_path = os.path.join(download_dir, name)
     print(f"[play_adaptive] Downloading checkpoint from OSS -> {download_path}")
     try:
