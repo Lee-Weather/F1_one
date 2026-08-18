@@ -288,7 +288,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         max_curriculum = 0.6
         # Vers: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         num_commands = 4
-        resampling_time = 25.  # time before command are changed[s]
+        resampling_time = 10.  # time before command are changed[s]  # exp1.2: 25->10 so episodes contain speed transitions
         gait = ["walk_omnidirectional","stand","walk_omnidirectional"] # gait type during training
         # proportion during whole life time
         gait_time_range = {"walk_sagittal": [2,6],
@@ -346,8 +346,8 @@ class X1DHStandCfg(LeggedRobotCfg):
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
             low_speed = 0.2
-            track_vel_hard = 0.5
-            lateral_vel = 0.6  # exp1.1: penalize body-frame lateral velocity (crab-walk fix)
+            track_vel_hard = 1.0  # exp1.2: 0.5->1.0 to counter forward-tracking loss
+            lateral_vel = 0.4  # exp1.1: penalize body-frame lateral velocity; exp1.2: 0.6->0.4 to restore stride drive
             # base pos
             default_joint_pos = 1.0
             orientation = 1.

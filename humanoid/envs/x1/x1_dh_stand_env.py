@@ -139,10 +139,13 @@ class X1DHStandEnv(LeggedRobot):
         Walking commands are expected in the 0~0.6 m/s range.  The cycle time
         grows linearly with speed and reaches its maximum at 0.6 m/s.  The
         lower bound keeps the phase generator well-conditioned near standstill.
+
+        exp1.2: uses the EMA-smoothed speed (self._smoothed_speed, updated once
+        per control step) so the cycle contracts/expands continuously when the
+        command changes, instead of jumping and breaking the phase schedule.
         """
-        speed = torch.norm(self.commands[:, :2], dim=1)
         speed = torch.clamp(
-            speed,
+            self._smoothed_speed,
             min=0.0,
             max=self.cfg.rewards.cycle_speed_max,
         )
@@ -277,6 +280,12 @@ class X1DHStandEnv(LeggedRobot):
         """
         self.phase_length_buf += 1
         self._resample_commands()
+        # exp1.2: EMA-smooth the commanded planar speed (tau ~ 0.5 s) so the
+        # gait cycle scales continuously across command changes.
+        with torch.no_grad():
+            target_speed = torch.norm(self.commands[:, :2], dim=1)
+            alpha = self.dt / 0.5
+            self._smoothed_speed += alpha * (target_speed - self._smoothed_speed)
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
@@ -540,6 +549,9 @@ class X1DHStandEnv(LeggedRobot):
         self.feet_air_time[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.phase_length_buf[env_ids] = 0
+        # exp1.2: reset smoothed speed so a new episode starts with the phase
+        # consistent with its freshly sampled command
+        self._smoothed_speed[env_ids] = torch.norm(self.commands[env_ids, :2], dim=1)
         self.reset_buf[env_ids] = 1
         # rand 0 or 0.5
         self.gait_start[env_ids] = torch.randint(0, 2, (len(env_ids),)).to(self.device)*0.5
@@ -590,6 +602,9 @@ class X1DHStandEnv(LeggedRobot):
         self.phase_length_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long)
         self.gait_start = torch.randint(0, 2, (self.num_envs,)).to(self.device)*0.5
+        # exp1.2: smoothed commanded speed for continuous gait-cycle scaling
+        # (EMA updated once per control step in _post_physics_step_callback)
+        self._smoothed_speed = torch.zeros(self.num_envs, device=self.device)
 
 # ================================================ Rewards ================================================== #
     def _reward_ref_joint_pos(self):
