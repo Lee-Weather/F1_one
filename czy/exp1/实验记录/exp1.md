@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | exp1 | 2026-08-17 | 恢复 diff 有参考轨迹 PPO，按平面速度自适应步态周期 | ✅ 完成（周期自适应验证通过；发现严重右偏螃蟹步 -34°） | TASK_20260817_070（已停，改远程） | limxmspwqm1g9hgfme@emalupe.com | czy/data/exp1/model.pt |
 | exp1.1 | 2026-08-17 | 新增 lateral_vel(0.6)+feet_yaw_align(0.4) 奖励修螃蟹步 | ✅ 完成（螃蟹步根治 +4.2°；代价：降速摔倒、前向跟踪 -22%） | —（远程 10.12.201.5） | — | czy/data/exp1.1/model.pt |
-| exp1.2 | 2026-08-18 | resampling_time 10s 训练变速切换 + 周期 EMA 平滑 + 奖励再平衡 | 代码就绪，待训练 | —（计划远程） | — | 待训练 |
+| exp1.2 | 2026-08-18 | resampling_time 10s 训练变速切换 + 周期 EMA 平滑 + 奖励再平衡 | 训练中（云端 TASK_20260818_009） | TASK_20260818_009 | limxmspwqm1g9hgfme@emalupe.com | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
@@ -267,11 +267,15 @@
 
 | 参数 | 值 |
 | --- | --- |
-| 训练方式 | 从零（远程 10.12.201.5，新时间戳目录） |
-| run_name | exp1.2 |
+| 训练方式 | 从零（云端 LimX 平台） |
+| Task ID | TASK_20260818_009（项目 PRO_20260817_008，2026-08-18 09:05 启动，状态 3 运行中） |
+| 算力 | ESKU000001（1×4090D 24G，¥5.4/h，与 exp1 系列一致） |
+| 镜像 | BJX00000001 / V000124（Isaac Gym preview-4） |
+| 代码源 | GitHub main @ c744962（远端 SHA 已核对） |
+| 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --run_name=exp1.2 --headless --max_iterations=5000` |
 | max_iterations | 5000（预计 ~3.9h） |
 | 其余配置 | 与 exp1.1 相同（num_envs 4096、seed 5、lr 1e-5） |
-| 代码提交 | `2d0fbb1` |
+| GitLab 镜像 | 未推送（按用户指示暂缓；skill 规范允许确认运行态后推送，待用户要求） |
 
 ### 6. 预期与验收
 
