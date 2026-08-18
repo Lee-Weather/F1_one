@@ -268,14 +268,16 @@
 | 参数 | 值 |
 | --- | --- |
 | 训练方式 | 从零（云端 LimX 平台） |
-| Task ID | TASK_20260818_009（项目 PRO_20260817_008，2026-08-18 09:05 启动，状态 3 运行中） |
-| 算力 | ESKU000001（1×4090D 24G，¥5.4/h，与 exp1 系列一致） |
+| Task ID | **TASK_20260818_028**（r5；09:54:57 启动，状态 3 运行中，新奖励 rew_lateral_vel/rew_feet_yaw_align 已出现在图表 keys） |
+| 失败历史 | r1=009、r2=012、r3=022、r4=026 均 182~183s 死亡：**私有仓库克隆超时**（账号中心 GitHub 凭据未被 pod 克隆使用）；各计费 ~0.27 元 |
+| 修复过程 | ① 用 register-limxdynamics-account skill 重新配置账号中心 GitHub 凭据（editGitInfo 200，token Lee-Weather 有效）仍超时；② **仓库转公开**后克隆成功——私有仓库克隆链路与账号凭据不兼容，公开仓库无此问题 |
+| 算力 | ESKU000001（1×4090D 24G，¥5.4/h） |
 | 镜像 | BJX00000001 / V000124（Isaac Gym preview-4） |
-| 代码源 | GitHub main @ c744962（远端 SHA 已核对） |
+| 代码源 | GitHub main @ d467ffd（远端 SHA 已核对） |
 | 启动命令 | `gm-run F1_one/humanoid/scripts/train.py --task=x1_dh_stand --run_name=exp1.2 --headless --max_iterations=5000` |
 | max_iterations | 5000（预计 ~3.9h） |
 | 其余配置 | 与 exp1.1 相同（num_envs 4096、seed 5、lr 1e-5） |
-| GitLab 镜像 | 未推送（按用户指示暂缓；skill 规范允许确认运行态后推送，待用户要求） |
+| GitLab 镜像 | 未推送（按用户指示暂缓） |
 
 ### 6. 预期与验收
 
