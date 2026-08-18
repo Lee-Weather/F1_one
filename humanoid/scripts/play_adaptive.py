@@ -13,6 +13,7 @@ import sys
 import glob
 import csv
 import math
+import re
 import shutil
 import base64
 import subprocess
@@ -211,7 +212,12 @@ def play(args):
             shutil.copy2(ckpt, dest)
             print(f"[play_adaptive] Copied checkpoint: {ckpt} -> {dest}")
         model_name = os.path.basename(ckpt)
-        train_cfg.runner.checkpoint = int(model_name.replace("model_", "").replace(".pt", ""))
+        # filename may carry an OSS timestamp suffix, e.g. model_5000_20260818114923A845.pt
+        match = re.match(r"model_(\d+)", model_name)
+        if not match:
+            print(f"[play_adaptive] ERROR: cannot parse checkpoint number from {model_name}")
+            sys.exit(1)
+        train_cfg.runner.checkpoint = int(match.group(1))
 
     # Build environment and policy
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
