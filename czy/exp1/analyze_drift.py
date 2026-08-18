@@ -1,5 +1,6 @@
 # Check lateral drift direction: world trajectory curvature analysis
 import csv
+import sys
 import numpy as np
 
 CSV_PATH = r"e:\X1\F1_one\F1_one\czy\data\exp1\isaac_diag.csv"
@@ -22,7 +23,8 @@ def load(path):
 
 
 def main():
-    d = load(CSV_PATH)
+    path = sys.argv[1] if len(sys.argv) > 1 else CSV_PATH
+    d = load(path)
     x, y = d["base_pos_x"], d["base_pos_y"]
 
     print("== full trajectory (world frame, 60s) ==")

@@ -223,6 +223,10 @@ def play(args):
         train_cfg.runner.checkpoint = int(match.group(1))
 
     # Build environment and policy
+    # Keep GPU camera sensors alive under --headless (base_task otherwise forces
+    # graphics_device_id=-1 and every camera frame comes back empty -> 0-byte video)
+    if RENDER:
+        env_cfg.env.enable_headless_render = True
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     ppo_runner, train_cfg, _ = task_registry.make_alg_runner(
         env=env, name=args.task, args=args, train_cfg=train_cfg
