@@ -317,8 +317,8 @@ class X1DHStandCfg(LeggedRobotCfg):
 
         # final_swing_joint_pos = final_swing_joint_delta_pos + default_pos
         final_swing_joint_delta_pos = [0.25, 0.05, -0.11, 0.35, -0.16, 0.0, -0.25, -0.05, 0.11, 0.35, -0.16, 0.0]
-        target_feet_height = 0.03
-        target_feet_height_max = 0.06
+        target_feet_height = 0.06  # exp1.5: 0.03->0.06 (exp1.4 lift only 5.3cm, band floor too low)
+        target_feet_height_max = 0.12  # exp1.5: 0.06->0.12 (unclamp lift ceiling)
         feet_to_ankle_distance = 0.041
         # Adaptive cycle: 0.35 s at standstill to 0.7 s at 0.6 m/s.
         cycle_speed_max = 0.6  # [m/s], walking-speed upper bound
@@ -356,7 +356,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             base_height = 0.2
             base_acc = 0.2
             # energy
-            action_smoothness = -0.002
+            action_smoothness = -0.008  # exp1.5: -0.002->-0.008 (exp1.4 torque rate 284 vs 1.3's 120 Nm/s)
             torques = -8e-9
             dof_vel = -2e-8
             dof_acc = -1e-7
