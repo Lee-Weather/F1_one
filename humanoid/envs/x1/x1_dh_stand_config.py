@@ -352,7 +352,8 @@ class X1DHStandCfg(LeggedRobotCfg):
             default_joint_pos = 1.0
             orientation = 1.
             feet_rotation = 0.3
-            feet_yaw_align = 0.4  # exp1.1: penalize foot toe-out yaw relative to base
+            feet_yaw_align = 0.6  # exp1.6: 0.4->0.6 (low-speed toe-out 15deg was the turning actuator behind -26deg drift)
+            yaw_align = 0.5  # exp1.6: body-heading dead-zone reward (sigma 5deg), cures -1.01deg/s slow turn
             base_height = 0.2
             base_acc = 0.2
             # energy

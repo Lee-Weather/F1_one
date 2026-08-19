@@ -814,8 +814,13 @@ class X1DHStandEnv(LeggedRobot):
         # Compute swing mask
         swing_mask = 1 - self._get_stance_mask()
 
-        # feet height should larger than target feet height at the peak
-        rew_pos = (self.feet_height > self.cfg.rewards.target_feet_height) * (self.feet_height < self.cfg.rewards.target_feet_height_max)
+        # exp1.6: gaussian peak at target height (smooth gradient replaces step band).
+        # Step band (h>min)*(h<max) had zero gradient -> policy sat at floor 6cm at low speed.
+        # Peak 9cm, sigma 2.5cm: continuous push toward 9cm regardless of walking speed,
+        # soft suppression above peak replaces the hard max cap.
+        peak = 0.09
+        sigma = 0.025
+        rew_pos = torch.exp(-((self.feet_height - peak) ** 2) / (2 * sigma ** 2))
         rew_pos = torch.sum(rew_pos * swing_mask, dim=1)
         self.feet_height *= ~contact
         return rew_pos
@@ -891,6 +896,20 @@ class X1DHStandEnv(LeggedRobot):
         rel = foot_yaw - base_yaw.unsqueeze(-1)
         rel = torch.atan2(torch.sin(rel), torch.cos(rel))  # wrap to [-pi, pi]
         return torch.exp(-torch.abs(rel).sum(dim=1) * 10.0)
+
+    def _reward_yaw_align(self):
+        """exp1.6: keep body yaw near zero (straight-line heading).
+
+        exp1.5 drifted -26deg over 60s at low speed (-1.01 deg/s slow turn)
+        because no reward constrained body heading. Gaussian dead-zone at 0
+        with sigma=0.087 rad (5deg): natural gait sway (<3deg) stays unpunished,
+        sustained offset (>10deg) scores ~0. Command yaw is always 0 in this
+        task; generalize to (yaw - cmd_yaw) if turning commands are added.
+        """
+        base_quat = self.root_states[:, 3:7]
+        yaw = torch.atan2(2.0 * (base_quat[:, 3] * base_quat[:, 2] + base_quat[:, 0] * base_quat[:, 1]),
+                          1.0 - 2.0 * (base_quat[:, 1] ** 2 + base_quat[:, 2] ** 2))
+        return torch.exp(-yaw ** 2 / (2 * 0.087 ** 2))
 
     def _reward_lateral_vel(self):
         """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
