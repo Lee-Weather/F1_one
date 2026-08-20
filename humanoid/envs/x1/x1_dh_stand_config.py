@@ -316,7 +316,10 @@ class X1DHStandCfg(LeggedRobotCfg):
         foot_max_dist = 1.0
 
         # final_swing_joint_pos = final_swing_joint_delta_pos + default_pos
-        final_swing_joint_delta_pos = [0.25, 0.05, -0.11, 0.35, -0.16, 0.0, -0.25, -0.05, 0.11, 0.35, -0.16, 0.0]
+        # exp1.9: raise mid-swing clearance (knee 0.35->0.50, ankle -0.16->-0.10 dorsiflexion
+        # to stop toe-dip, hip 0.25->0.30 compensates stride loss). exp1.8 replay showed
+        # true mid-swing gap only ~1.6cm -> 84 mid-swing ground touches per foot @4kN.
+        final_swing_joint_delta_pos = [0.30, 0.05, -0.11, 0.50, -0.10, 0.0, -0.30, 0.05, 0.11, 0.50, -0.10, 0.0]
         target_feet_height = 0.06  # exp1.5: 0.03->0.06 (exp1.4 lift only 5.3cm, band floor too low)
         target_feet_height_max = 0.12  # exp1.5: 0.06->0.12 (unclamp lift ceiling)
         feet_to_ankle_distance = 0.041
@@ -343,6 +346,9 @@ class X1DHStandCfg(LeggedRobotCfg):
             knee_distance = 0.2
             # contact
             feet_contact_forces = -0.01
+            # exp1.9: penalize ground contact during the SWING phase only (stance-mask gated);
+            # exp1.8's -0.01 undirected penalty could not stop 84 mid-swing touches/foot.
+            swing_contact = -0.5
             # vel tracking
             tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1

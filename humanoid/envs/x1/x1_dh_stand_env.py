@@ -734,6 +734,24 @@ class X1DHStandEnv(LeggedRobot):
         """
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) - self.cfg.rewards.max_contact_force).clip(0, 400), dim=1)
 
+    def _reward_swing_contact(self):
+        """
+        exp1.9: Penalize any ground contact during the SWING phase (stance-mask gated).
+
+        exp1.8 replay showed 84 mid-swing ground touches per foot in 35 s (up to 4 kN):
+        the foot dips onto the ground mid-swing (stutter step), injecting lateral/yaw
+        impulses (yaw drifted +47 deg) and hard impacts. The undirected
+        feet_contact_forces penalty cannot distinguish these from normal landings.
+
+        Only fires when the gait phase says the foot should be swinging, so normal
+        touchdown at swing->stance transition is unaffected (double-support zone has
+        stance_mask==1 for both feet).
+        """
+        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        swing_mask = 1 - self._get_stance_mask()
+        force_norm = torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) / 100.
+        return torch.sum(force_norm * contact.float() * swing_mask, dim=1)
+
     def _reward_default_joint_pos(self):
         """
         Calculates the reward for keeping joint positions close to default positions, with a focus 
@@ -852,10 +870,12 @@ class X1DHStandEnv(LeggedRobot):
         # accumulated feet_height. exp1.6's gaussian over the cumulative quantity
         # drifted with swing duration (slow 0.9s swings accumulated past the peak
         # then got pulled back down) -> lift stuck at 4.8cm.
-        # Peak 9cm, sigma 2.5cm on per-frame height: every swing step has a direct
-        # gradient pushing the foot toward 9cm regardless of speed/duration.
-        peak = 0.09
-        sigma = 0.025
+        # exp1.9: peak 9->6.5cm, sigma 2.5->3.5cm. exp1.8's true swing gap was ~1.6cm
+        # where the old gaussian gave reward ~0.02 (no gradient). New center matches
+        # the raised reference trajectory; wider sigma puts usable gradient at low
+        # heights so the foot is pulled up off the ground early in swing.
+        peak = 0.065
+        sigma = 0.035
         rew_pos = torch.exp(-((feet_z - peak) ** 2) / (2 * sigma ** 2))
         rew_pos = torch.sum(rew_pos * swing_mask, dim=1)
         self.feet_height *= ~contact
