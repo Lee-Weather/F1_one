@@ -302,7 +302,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         sw_switch = True # use stand_com_threshold or not
 
         class ranges:
-            lin_vel_x = [-0.4, 0.6] # backward/forward limits [m/s]
+            lin_vel_x = [-0.4, 0.8] # backward/forward limits [m/s] exp1.8: 0.6->0.8 top speed
             lin_vel_y = [-0.4, 0.4]   # min max [m/s]
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
             heading = [-3.14, 3.14]
@@ -320,10 +320,12 @@ class X1DHStandCfg(LeggedRobotCfg):
         target_feet_height = 0.06  # exp1.5: 0.03->0.06 (exp1.4 lift only 5.3cm, band floor too low)
         target_feet_height_max = 0.12  # exp1.5: 0.06->0.12 (unclamp lift ceiling)
         feet_to_ankle_distance = 0.041
-        # Adaptive cycle: 0.35 s at standstill to 0.7 s at 0.6 m/s.
-        cycle_speed_max = 0.6  # [m/s], walking-speed upper bound
-        cycle_time_min = 0.35  # [s], low-speed lower bound
-        cycle_time_max = 0.7   # [s], maximum cycle at 0.6 m/s
+        # Adaptive cycle: 0.5 s at standstill to 0.8 s at 0.8 m/s. exp1.8: was 0.35~0.7 @ 0.6.
+        # Higher floor slows cadence everywhere (bigger strides at same speed -> more stable);
+        # deploy side rl_x1.yaml adaptive_cycle must be synced to 0.5~0.8 @ 0.8.
+        cycle_speed_max = 0.8  # [m/s], walking-speed upper bound
+        cycle_time_min = 0.5   # [s], low-speed lower bound
+        cycle_time_max = 0.8   # [s], maximum cycle at 0.8 m/s
         # if true negative total rewards are clipped at zero (avoids early termination problems)
         only_positive_rewards = True
         # tracking reward = exp(-error*sigma)
@@ -345,7 +347,7 @@ class X1DHStandCfg(LeggedRobotCfg):
             tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1
             vel_mismatch_exp = 0.5  # lin_z; ang x,y
-            low_speed = 0.5  # exp1.4: 0.2->0.5 to curb acceleration overshoot (exp1.3 fell at 1.43m/s)
+            low_speed = 0.7  # exp1.8: 0.5->0.7 (exp1.7 seg2 overshot to 0.727/fell; ramp curriculum re-loosened speed)
             track_vel_hard = 0.5  # exp1.3: rollback exp1.2's 1.0 (negative-value pit encouraged lazy standing)
             lateral_vel = 0.6  # exp1.3: rollback exp1.2's 0.4 (exp1.1-proven config that walks)
             # base pos
