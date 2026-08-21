@@ -183,10 +183,13 @@ class X1DHStandCfg(LeggedRobotCfg):
         # push
         push_robots = True
         push_interval_s = 4 # every this second, push robot
-        update_step = 2000 * 24 # after this count, increase push_duration index
-        push_duration = [0, 0.05, 0.1, 0.15, 0.2, 0.25] # increase push duration during training
-        max_push_vel_xy = 0.2
-        max_push_ang_vel = 0.2
+        # exp1.10: 2000*24->1000*24 so the 5000-iter run walks the FULL push-duration
+        # curriculum (exp1.9 only reached index 2/6: long pushes 0.15~0.25s never seen).
+        # Last tier 0.30 added, amplitudes 0.2->0.25: robustness is this round's priority.
+        update_step = 1000 * 24 # after this count, increase push_duration index
+        push_duration = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.30] # increase push duration during training
+        max_push_vel_xy = 0.25
+        max_push_ang_vel = 0.25
 
         randomize_base_mass = True
         added_mass_range = [-3, 3] # base mass rand range, base mass is all fix link sum mass
@@ -319,7 +322,10 @@ class X1DHStandCfg(LeggedRobotCfg):
         # exp1.9: raise mid-swing clearance (knee 0.35->0.50, ankle -0.16->-0.10 dorsiflexion
         # to stop toe-dip, hip 0.25->0.30 compensates stride loss). exp1.8 replay showed
         # true mid-swing gap only ~1.6cm -> 84 mid-swing ground touches per foot @4kN.
-        final_swing_joint_delta_pos = [0.30, 0.05, -0.11, 0.50, -0.10, 0.0, -0.30, 0.05, 0.11, 0.50, -0.10, 0.0]
+        # exp1.10: ankle -0.10->-0.05 (more dorsiflexion: ~+1cm true clearance AND near-flat
+        # touchdown to cut the toe-first stumble chain behind exp1.9's seg2 deep dip; knee
+        # kept at 0.50 to hold lift height), hip 0.30->0.35 (stride + lift arc compensation).
+        final_swing_joint_delta_pos = [0.35, 0.05, -0.11, 0.50, -0.05, 0.0, -0.35, 0.05, 0.11, 0.50, -0.05, 0.0]
         target_feet_height = 0.06  # exp1.5: 0.03->0.06 (exp1.4 lift only 5.3cm, band floor too low)
         target_feet_height_max = 0.12  # exp1.5: 0.06->0.12 (unclamp lift ceiling)
         feet_to_ankle_distance = 0.041
@@ -337,7 +343,10 @@ class X1DHStandCfg(LeggedRobotCfg):
         
         class scales:
             ref_joint_pos = 2.2
-            feet_clearance = 1.
+            # exp1.10: 1.0->1.5. Lift height is the protected metric this round (P50 target
+            # 3.2->>=3.5cm); heavier weight keeps clearance winning the reward trade-off
+            # after swing_contact is halved (-0.5->-0.3).
+            feet_clearance = 1.5
             feet_contact_number = 2.0
             # gait
             feet_air_time = 1.2
@@ -348,7 +357,9 @@ class X1DHStandCfg(LeggedRobotCfg):
             feet_contact_forces = -0.01
             # exp1.9: penalize ground contact during the SWING phase only (stance-mask gated);
             # exp1.8's -0.01 undirected penalty could not stop 84 mid-swing touches/foot.
-            swing_contact = -0.5
+            # exp1.10: -0.5->-0.3 (touchdowns cured to 10/6 per foot; halve the penalty to
+            # release the high-speed conservatism that dragged 0.8-seg tracking to 72%).
+            swing_contact = -0.3
             # vel tracking
             tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1
