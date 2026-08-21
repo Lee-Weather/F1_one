@@ -360,6 +360,9 @@ class X1DHStandCfg(LeggedRobotCfg):
             # exp1.10: -0.5->-0.3 (touchdowns cured to 10/6 per foot; halve the penalty to
             # release the high-speed conservatism that dragged 0.8-seg tracking to 72%).
             swing_contact = -0.3
+            # exp1.11: hard wall on base pitch (dead zone 0.12 rad, quadratic ramp).
+            # All exp-series falls share the chain: overspeed -> forward pitch -> face plant.
+            pitch_limit = -1.0
             # vel tracking
             tracking_lin_vel = 1.8
             tracking_ang_vel = 1.1

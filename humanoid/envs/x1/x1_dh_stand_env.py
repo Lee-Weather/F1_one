@@ -703,7 +703,10 @@ class X1DHStandEnv(LeggedRobot):
         self.last_contacts = contact
         first_contact = (self.feet_air_time > 0.) * self.contact_filt
         self.feet_air_time += self.dt
-        air_time = self.feet_air_time.clamp(0, 0.5) * first_contact
+        # exp1.11: clamp 0.5->0.45s. exp1.10's overspeed falls (v up to 5.6x cmd) were
+        # rewarded mid-flight by long air times; with gait cycles 0.5~0.8s anything above
+        # ~0.45s is a runaway stride, not a normal swing.
+        air_time = self.feet_air_time.clamp(0, 0.45) * first_contact
         self.feet_air_time *= ~self.contact_filt
         return air_time.sum(dim=1)
 
@@ -901,10 +904,27 @@ class X1DHStandEnv(LeggedRobot):
 
         reward = torch.zeros_like(actual_speed)
         reward[speed_too_low] = -1.0
-        reward[speed_too_high] = -1.0  # exp1.4: overspeed was free (0), caused 1.43m/s runaway falls
+        # exp1.11: graded overspeed penalty. exp1.4's flat -1.0 gave no gradient beyond
+        # 1.2x cmd, so exp1.10 sprints reached 2.5~5.6x cmd before falling forward.
+        # Linear ramp with speed excess, capped at -5.0: 1.5x -> -2.5, 2x -> -4.0.
+        excess = (actual_speed - 1.2 * command_speed) / torch.clamp(command_speed, min=0.1)
+        overspeed_pen = torch.clamp(-1.0 - 3.0 * excess, min=-5.0)
+        reward = torch.where(speed_too_high, overspeed_pen, reward)
         reward[speed_desired] = 1.2
         reward[direction_mismatch] = -2.0
         return reward * active_command
+
+    def _reward_pitch_limit(self):
+        """
+        exp1.11: Hard wall on base pitch. All exp-series falls (1.3/1.7/1.9/1.10) share
+        one failure chain: runaway forward speed -> trunk pitches forward -> face plant.
+        The soft orientation reward exp(-|pitch|*10) still pays 0.30 at pitch=0.3 rad,
+        so the pre-fall phase went unpunished. Dead zone 0.12 rad (normal walking
+        lean), quadratic ramp beyond: 0.2 rad -> -0.26/step, 0.4 rad -> -2.9/step.
+        """
+        pitch = torch.abs(self.base_euler_xyz[:, 1])
+        pen = torch.clamp(pitch - 0.12, 0.0, 0.5)
+        return pen * pen * 40.0
     
     def _reward_torques(self):
         """
