@@ -69,3 +69,6 @@ czy/data/
 
 # GM CLI temp task payloads
 create-*.json
+
+# exp2.0: play tool improvements backup (not tracked, survives full-tree rollback)
+czy/play-tools-backup/

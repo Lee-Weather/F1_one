@@ -38,11 +38,10 @@ from humanoid.utils import get_args, task_registry
 # The gait cycle maps 0 -> 0.6 m/s to 0.35 -> 0.7 s (see _get_cycle_time).
 # ---------------------------------------------------------------------------
 VEL_PROFILE = [
-    # exp2.0: back to 0.6 m/s top speed (exp1.5 stable base, cycle 0.35~0.7 s).
-    (500, 0.2),   # slow  walk, cycle ~0.47 s (exp1.5 map: 0.35 + v/0.6*0.35)
+    (500, 0.2),   # slow  walk, cycle ~0.47 s
     (500, 0.4),   # mid   walk, cycle ~0.58 s
-    (500, 0.6),   # fast  walk, cycle ~0.70 s
-    (500, 0.4),   # slow down (0.6->0.4 decel, tests ramp robustness)
+    (500, 0.6),   # fast  walk, cycle ~0.70 s (longest stride)
+    (500, 0.4),   # slow down
     (500, 0.2),   # slow down further
     (500, 0.0),   # stand still (phase cleared by stand logic)
 ]

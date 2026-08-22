@@ -19,7 +19,7 @@
 | exp1.9 | 2026-08-20 | 摆动轨迹加高 + clearance 高斯重定心 + swing_contact 惩罚 | ⚠️ 完成（中间触地 84→10/6 次/脚根治、间隙 1.6→3.2cm；代价 seg2 深跌 1 次、0.8 段 72%） | TASK_20260820_171 | limxmsy8px5aduccvm（4234） | czy/data/exp1.9/model_5000.pt |
 | exp1.10 | 2026-08-21 | 推力课程真激活 + 平板落地治深跌 + 抬腿高度保护 | ⚠️ 完成（抬腿 P50 4.8cm、0.8 段 88%、触地 8/8 三大战果；摔倒 2 次超速前扑破红线） | TASK_20260821_013 | limxmsy8px5aduccvm（4234） | czy/data/exp1.10/model_5000.pt |
 | exp1.11 | 2026-08-21 | 分级超速惩罚 + pitch 硬墙 + air_time 上限收紧 | ❌ 完成（摔倒仍 2 次、触地反弹 R 61 次、P50 2.7cm 破红线；六轮叠加调参失败，触发阶段重置） | TASK_20260821_129 | limxmsy8px5aduccvm（4234） | czy/data/exp1.11/model_5000.pt |
-| exp2.0 | 2026-08-21 | 完整回退 exp1.5 稳定基线（0.6 m/s + cycle 0.35~0.7s），重开 exp2 系列 | 训练中 | TASK_20260821_xxx | limxmsy8px5aduccvm（4234） | 待训练 |
+| exp2.0 | 2026-08-21 | 完整回退 exp1.5 稳定基线（0.6 m/s + cycle 0.35~0.7s），重开 exp2 系列 | 训练中 | TASK_20260822_015 | limxmsy8q5ux79t3ew@emalupe.com（4236） | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
