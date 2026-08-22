@@ -234,23 +234,7 @@ class X1DHStandEnv(LeggedRobot):
             self.commands[env_ids, 2] = torch.zeros(len(env_ids), device=self.device)
             
     def _resample_walk_sagittal_command(self, env_ids):
-        # exp1.7: 30% of resamples become RAMP transitions (linear interpolation
-        # to the new target over 0.8~2.0s) instead of instantaneous steps.
-        # Real-robot falls (8.19) happened at 0.5~0.6 m/s^2 decel ramps which the
-        # 10s-step command distribution never covered (OOD). Ramps here expose
-        # the policy to exactly that regime during training.
-        new_cmd = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-        ramp_mask = torch.rand(len(env_ids), device=self.device) < 0.3
-        if ramp_mask.any():
-            ramp_ids = env_ids[ramp_mask]
-            self._ramp_target[ramp_ids] = new_cmd[ramp_mask]
-            self._ramp_remaining[ramp_ids] = torch_rand_float(0.8, 2.0, (len(ramp_ids),), device=self.device)
-            # keep current command value; it will interpolate in _post_physics_step_callback
-            step_ids = env_ids[~ramp_mask]
-        else:
-            step_ids = env_ids
-        if len(step_ids) > 0:
-            self.commands[step_ids, 0] = new_cmd[~ramp_mask] if ramp_mask.any() else new_cmd
+        self.commands[env_ids, 0] = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         self.commands[env_ids, 1] = torch.zeros(len(env_ids), device=self.device)
         if self.cfg.commands.heading_command:
             self.commands[env_ids, 3] = torch.zeros(len(env_ids), device=self.device)
@@ -296,21 +280,6 @@ class X1DHStandEnv(LeggedRobot):
         """
         self.phase_length_buf += 1
         self._resample_commands()
-        # exp1.7: advance active command ramps (linear interpolation toward the
-        # stored target). Runs before the EMA smoothing below so the smoothed
-        # speed sees the ramped command.
-        with torch.no_grad():
-            ramping = self._ramp_remaining > 0
-            if ramping.any():
-                ids = ramping.nonzero(as_tuple=False).flatten()
-                self._ramp_remaining[ids] -= self.dt
-                done = self._ramp_remaining[ids] <= 0
-                # move proportionally toward target within remaining time (>=dt)
-                rem = torch.clamp(self._ramp_remaining[ids], min=self.dt)
-                frac = torch.clamp(self.dt / rem, max=1.0).unsqueeze(1)
-                self.commands[ids, 0:1] += frac * (self._ramp_target[ids].unsqueeze(1) - self.commands[ids, 0:1])
-                self.commands[ids[done], 0] = self._ramp_target[ids[done]]
-                self._ramp_remaining[ids[done]] = 0.0
         # exp1.2: EMA-smooth the commanded planar speed (tau ~ 0.5 s) so the
         # gait cycle scales continuously across command changes.
         with torch.no_grad():
@@ -636,9 +605,6 @@ class X1DHStandEnv(LeggedRobot):
         # exp1.2: smoothed commanded speed for continuous gait-cycle scaling
         # (EMA updated once per control step in _post_physics_step_callback)
         self._smoothed_speed = torch.zeros(self.num_envs, device=self.device)
-        # exp1.7: command ramp buffers (see _resample_walk_sagittal_command)
-        self._ramp_target = torch.zeros(self.num_envs, device=self.device)
-        self._ramp_remaining = torch.zeros(self.num_envs, device=self.device)
 
 # ================================================ Rewards ================================================== #
     def _reward_ref_joint_pos(self):
@@ -703,10 +669,7 @@ class X1DHStandEnv(LeggedRobot):
         self.last_contacts = contact
         first_contact = (self.feet_air_time > 0.) * self.contact_filt
         self.feet_air_time += self.dt
-        # exp1.11: clamp 0.5->0.45s. exp1.10's overspeed falls (v up to 5.6x cmd) were
-        # rewarded mid-flight by long air times; with gait cycles 0.5~0.8s anything above
-        # ~0.45s is a runaway stride, not a normal swing.
-        air_time = self.feet_air_time.clamp(0, 0.45) * first_contact
+        air_time = self.feet_air_time.clamp(0, 0.5) * first_contact
         self.feet_air_time *= ~self.contact_filt
         return air_time.sum(dim=1)
 
@@ -736,24 +699,6 @@ class X1DHStandEnv(LeggedRobot):
         high contact forces on the feet.
         """
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) - self.cfg.rewards.max_contact_force).clip(0, 400), dim=1)
-
-    def _reward_swing_contact(self):
-        """
-        exp1.9: Penalize any ground contact during the SWING phase (stance-mask gated).
-
-        exp1.8 replay showed 84 mid-swing ground touches per foot in 35 s (up to 4 kN):
-        the foot dips onto the ground mid-swing (stutter step), injecting lateral/yaw
-        impulses (yaw drifted +47 deg) and hard impacts. The undirected
-        feet_contact_forces penalty cannot distinguish these from normal landings.
-
-        Only fires when the gait phase says the foot should be swinging, so normal
-        touchdown at swing->stance transition is unaffected (double-support zone has
-        stance_mask==1 for both feet).
-        """
-        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
-        swing_mask = 1 - self._get_stance_mask()
-        force_norm = torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) / 100.
-        return torch.sum(force_norm * contact.float() * swing_mask, dim=1)
 
     def _reward_default_joint_pos(self):
         """
@@ -869,17 +814,8 @@ class X1DHStandEnv(LeggedRobot):
         # Compute swing mask
         swing_mask = 1 - self._get_stance_mask()
 
-        # exp1.7: gaussian peak on the INSTANTANEOUS foot height (feet_z), not the
-        # accumulated feet_height. exp1.6's gaussian over the cumulative quantity
-        # drifted with swing duration (slow 0.9s swings accumulated past the peak
-        # then got pulled back down) -> lift stuck at 4.8cm.
-        # exp1.9: peak 9->6.5cm, sigma 2.5->3.5cm. exp1.8's true swing gap was ~1.6cm
-        # where the old gaussian gave reward ~0.02 (no gradient). New center matches
-        # the raised reference trajectory; wider sigma puts usable gradient at low
-        # heights so the foot is pulled up off the ground early in swing.
-        peak = 0.065
-        sigma = 0.035
-        rew_pos = torch.exp(-((feet_z - peak) ** 2) / (2 * sigma ** 2))
+        # feet height should larger than target feet height at the peak
+        rew_pos = (self.feet_height > self.cfg.rewards.target_feet_height) * (self.feet_height < self.cfg.rewards.target_feet_height_max)
         rew_pos = torch.sum(rew_pos * swing_mask, dim=1)
         self.feet_height *= ~contact
         return rew_pos
@@ -904,27 +840,10 @@ class X1DHStandEnv(LeggedRobot):
 
         reward = torch.zeros_like(actual_speed)
         reward[speed_too_low] = -1.0
-        # exp1.11: graded overspeed penalty. exp1.4's flat -1.0 gave no gradient beyond
-        # 1.2x cmd, so exp1.10 sprints reached 2.5~5.6x cmd before falling forward.
-        # Linear ramp with speed excess, capped at -5.0: 1.5x -> -2.5, 2x -> -4.0.
-        excess = (actual_speed - 1.2 * command_speed) / torch.clamp(command_speed, min=0.1)
-        overspeed_pen = torch.clamp(-1.0 - 3.0 * excess, min=-5.0)
-        reward = torch.where(speed_too_high, overspeed_pen, reward)
+        reward[speed_too_high] = -1.0  # exp1.4: overspeed was free (0), caused 1.43m/s runaway falls
         reward[speed_desired] = 1.2
         reward[direction_mismatch] = -2.0
         return reward * active_command
-
-    def _reward_pitch_limit(self):
-        """
-        exp1.11: Hard wall on base pitch. All exp-series falls (1.3/1.7/1.9/1.10) share
-        one failure chain: runaway forward speed -> trunk pitches forward -> face plant.
-        The soft orientation reward exp(-|pitch|*10) still pays 0.30 at pitch=0.3 rad,
-        so the pre-fall phase went unpunished. Dead zone 0.12 rad (normal walking
-        lean), quadratic ramp beyond: 0.2 rad -> -0.26/step, 0.4 rad -> -2.9/step.
-        """
-        pitch = torch.abs(self.base_euler_xyz[:, 1])
-        pen = torch.clamp(pitch - 0.12, 0.0, 0.5)
-        return pen * pen * 40.0
     
     def _reward_torques(self):
         """
@@ -972,19 +891,6 @@ class X1DHStandEnv(LeggedRobot):
         rel = foot_yaw - base_yaw.unsqueeze(-1)
         rel = torch.atan2(torch.sin(rel), torch.cos(rel))  # wrap to [-pi, pi]
         return torch.exp(-torch.abs(rel).sum(dim=1) * 10.0)
-
-    def _reward_yaw_align(self):
-        """exp1.7: keep body yaw near zero - HARD decay, no dead-zone.
-
-        exp1.6's gaussian dead-zone (sigma=5deg) let the policy hug the zone
-        edge and circle-walk: yaw crept to +56deg (sim) / +44deg (real robot).
-        Linear decay exp(-|yaw|*20) scores 0.35 at 3deg, 0.18 at 5deg ->
-        sustained offset is punished immediately, no exploitable flat region.
-        """
-        base_quat = self.root_states[:, 3:7]
-        yaw = torch.atan2(2.0 * (base_quat[:, 3] * base_quat[:, 2] + base_quat[:, 0] * base_quat[:, 1]),
-                          1.0 - 2.0 * (base_quat[:, 1] ** 2 + base_quat[:, 2] ** 2))
-        return torch.exp(-torch.abs(yaw) * 20.0)
 
     def _reward_lateral_vel(self):
         """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
