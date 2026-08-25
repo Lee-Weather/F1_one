@@ -148,8 +148,12 @@ class X1DHStandCfg(LeggedRobotCfg):
 
         stiffness = {'hip_pitch_joint': 30, 'hip_roll_joint': 40,'hip_yaw_joint': 35,
                      'knee_pitch_joint': 100, 'ankle_pitch_joint': 35, 'ankle_roll_joint': 35}
-        damping = {'hip_pitch_joint': 3, 'hip_roll_joint': 3.0,'hip_yaw_joint': 4, 
-                   'knee_pitch_joint': 10, 'ankle_pitch_joint': 0.5, 'ankle_roll_joint': 0.5}
+        # exp2.3: ankle Kd 0.5->2.5. Real-robot ankle oscillation measured 126~160 vel
+        # zero-crossings/10s vs sim 41~47 (underdamped); exp2.2 heavy-knee sim blew up to
+        # 178~277. Kp 35 with J~0.005 gives damping ratio <0.1 at Kd 0.5 -> ~0.5 at 2.5.
+        # DEPLOY SIDE: must sync the same Kd on the robot (verify thermals first).
+        damping = {'hip_pitch_joint': 3, 'hip_roll_joint': 3.0,'hip_yaw_joint': 4,
+                   'knee_pitch_joint': 10, 'ankle_pitch_joint': 2.5, 'ankle_roll_joint': 2.5}
 
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.5
@@ -349,8 +353,12 @@ class X1DHStandCfg(LeggedRobotCfg):
         
         class scales:
             ref_joint_pos = 2.2
-            feet_clearance = 1.
+            # exp2.3: 1.0->1.5. Lift height is THE target this round (drag-walking cure);
+            # gaussian now pays real gradient at low heights (0.44 at 2cm).
+            feet_clearance = 1.5
             feet_contact_number = 2.0
+            # exp2.3: cost side of the lift loop - penalize swing-phase ground contact.
+            swing_contact = -0.5
             # gait
             feet_air_time = 1.2
             foot_slip = -0.1

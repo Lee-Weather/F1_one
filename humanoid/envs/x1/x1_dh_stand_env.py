@@ -814,11 +814,30 @@ class X1DHStandEnv(LeggedRobot):
         # Compute swing mask
         swing_mask = 1 - self._get_stance_mask()
 
-        # feet height should larger than target feet height at the peak
-        rew_pos = (self.feet_height > self.cfg.rewards.target_feet_height) * (self.feet_height < self.cfg.rewards.target_feet_height_max)
+        # exp2.3: instantaneous-height gaussian on feet_z (peak 6.5cm, sigma 3.5cm).
+        # exp2.2 proved the old cumulative-height 0/1 band has no gradient under heavy
+        # knees: mean swing gap fell to 0.3~1.4cm with 0~2% of frames above 3cm (drag
+        # walking). Gaussian pays 0.44 at 2cm -> first direct reward for real clearance.
+        peak = 0.065
+        sigma = 0.035
+        rew_pos = torch.exp(-((feet_z - peak) ** 2) / (2 * sigma ** 2))
         rew_pos = torch.sum(rew_pos * swing_mask, dim=1)
         self.feet_height *= ~contact
         return rew_pos
+
+    def _reward_swing_contact(self):
+        """
+        exp2.3: Penalize ground contact during the SWING phase (stance-mask gated).
+
+        Pairs with the clearance gaussian as the cost side of the lift closed loop
+        (exp1.9 validation: 84 -> 10/6 touches per foot). Only fires when the gait
+        phase says the foot should be swinging; normal touchdown at swing->stance
+        transition is in the double-support zone (stance_mask==1) and unaffected.
+        """
+        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        swing_mask = 1 - self._get_stance_mask()
+        force_norm = torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) / 100.
+        return torch.sum(force_norm * contact.float() * swing_mask, dim=1)
 
     def _reward_low_speed(self):
         """Reward planar speed tracking and movement direction."""
@@ -840,7 +859,13 @@ class X1DHStandEnv(LeggedRobot):
 
         reward = torch.zeros_like(actual_speed)
         reward[speed_too_low] = -1.0
-        reward[speed_too_high] = -1.0  # exp1.4: overspeed was free (0), caused 1.43m/s runaway falls
+        # exp2.3: graded overspeed penalty. Flat -1.0 gave no gradient beyond 1.2x cmd;
+        # exp2.2's heavy-knee policy sprinted to 4.2x cmd on the decel segment before
+        # falling forward. Linear ramp with excess, capped at -5.0 (1.5x -> -2.5, 2x -> -4.0).
+        # NOTE (exp1.11 lesson): do NOT pair with air_time clamping.
+        excess = (actual_speed - 1.2 * command_speed) / torch.clamp(command_speed, min=0.1)
+        overspeed_pen = torch.clamp(-1.0 - 3.0 * excess, min=-5.0)
+        reward = torch.where(speed_too_high, overspeed_pen, reward)
         reward[speed_desired] = 1.2
         reward[direction_mismatch] = -2.0
         return reward * active_command
