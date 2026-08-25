@@ -240,19 +240,30 @@ class X1DHStandCfg(LeggedRobotCfg):
         joint_9_damping_range = [0.9, 1.5]
         joint_10_damping_range = [0.9, 1.5]
 
+        # exp2.2: align armature domain randomization with the real-robot step-test
+        # identification (czy/diff/GENERAL_JOINT_STEP_DYNAMICS_ANALYSIS_WORKFLOW.md).
+        # Identified torque-based J vs URDF M_ii: knees 3.2x (0.363/0.360 vs 0.113,
+        # the clearest L/R-consistent gap), hip pitch ~1.7x/1.5x, hip yaw ~1.5x/1.2x;
+        # hip roll identification unreliable, ankles untested -> keep baseline range.
+        # Armature center = identified J - URDF J, +/-30% to cover uncertainty.
+        # NOTE: the old each_joint=False mode shared ONE [0.0001,0.05] sample across all
+        # 12 joints (knees actually need ~0.25, a 5x gap); enabling each_joint requires
+        # joint_11/12 keys to exist or the env crashes with AttributeError.
         randomize_joint_armature = True
-        randomize_joint_armature_each_joint = False
-        joint_armature_range = [0.0001, 0.05]     # Factor
-        joint_1_armature_range = [0.0001, 0.05]
-        joint_2_armature_range = [0.0001, 0.05]
-        joint_3_armature_range = [0.0001, 0.05]
-        joint_4_armature_range = [0.0001, 0.05]
-        joint_5_armature_range = [0.0001, 0.05]
-        joint_6_armature_range = [0.0001, 0.05]
-        joint_7_armature_range = [0.0001, 0.05]
-        joint_8_armature_range = [0.0001, 0.05]
-        joint_9_armature_range = [0.0001, 0.05]
-        joint_10_armature_range = [0.0001, 0.05]
+        randomize_joint_armature_each_joint = True
+        joint_armature_range = [0.0001, 0.05]     # fallback (unused in each_joint mode)
+        joint_1_armature_range = [0.09, 0.23]     # L hip pitch (id 0.196)
+        joint_2_armature_range = [0.0001, 0.05]   # L hip roll (id unreliable)
+        joint_3_armature_range = [0.003, 0.018]   # L hip yaw (id 0.0148)
+        joint_4_armature_range = [0.18, 0.32]     # L knee (id 0.250) CORE
+        joint_5_armature_range = [0.0001, 0.05]   # L ankle pitch (no data)
+        joint_6_armature_range = [0.0001, 0.05]   # L ankle roll (no data)
+        joint_7_armature_range = [0.09, 0.23]     # R hip pitch (id 0.129, symmetrized)
+        joint_8_armature_range = [0.0001, 0.05]   # R hip roll (id unreliable)
+        joint_9_armature_range = [0.003, 0.018]   # R hip yaw (id 0.0060)
+        joint_10_armature_range = [0.18, 0.32]    # R knee (id 0.246) CORE
+        joint_11_armature_range = [0.0001, 0.05]  # R ankle pitch (added: each_joint loops 12)
+        joint_12_armature_range = [0.0001, 0.05]  # R ankle roll (added)
 
         add_lag = True
         randomize_lag_timesteps = True
