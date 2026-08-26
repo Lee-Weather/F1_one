@@ -24,7 +24,7 @@
 | exp2.2 | 2026-08-25 | armature 按真机辨识对齐（膝 3.2×URDF 核心，每关节独立随机化） | ❌ 完成（真机对标价值确认[膝摆幅比 0.35 缺口]，但仿真内超速前扑复发摔 1 次、短支撑反弹 74/82、踝抖 4~6×；需组合轮配套） | TASK_20260825_076 | limxmsy8q5ux79t3ew@emalupe.com（4236） | czy/data/exp2.2/model_5000.pt |
 | exp2.3 | 2026-08-25 | 抬腿专项（clearance 瞬时高斯 1.5 + swing_contact -0.5）+ 踝 Kd 2.5 + 超速分级 | ❌ 完成（抬腿闭环机制验证成功：0.6m/s 段间隙 4.1cm/t(3cm) 58%/中间触地 0，蹭地根治；但验收 REJECT——4 摔同源 yaw 漂移-50°→超速前扑、低速抬腿 2.0cm、步频 1.9×、净前进仅 0.51m；主失效转移为航向漂移） | TASK_20260825_235 | limxmsy8rw775bawr8@emalupe.com（4238） | czy/data/exp2.3/model_5000.pt |
 | exp2.4 | 2026-08-26 | 航向闭环（heading_command=True, ±0.5）+ 参考轨迹 R hip_roll 镜像修复（FK 实证蟹步偏置源） | ⚠️ 部分成（yaw 漂移根治 ≤0.067 rad、对称性根治 冲量比 0.96/踝 1.07×、高速间隙 6cm/82%；训练 4580 iter 被抢占取 4500；仍 2 摔=纯超速 0.6 档 3.3m/s、步频 2.06×、净前进 3.08m 贴红线） | TASK_20260826_046 | limxmsy8rw775bawr8@emalupe.com（4238） | czy/data/exp2.4/model_4500.pt |
-| exp2.5 | 2026-08-26 | 高速刹车专项（超速终止 EMA>max(1.5,2×cmd) + low_speed 1.15×/slope6 + stance_missing -0.3） | 代码就绪待训 | 待启动 | limxmsy8rw775bawr8@emalupe.com（4238） | 待训练 |
+| exp2.5 | 2026-08-26 | 高速刹车专项（超速终止 EMA>max(1.5,2×cmd) + low_speed 1.15×/slope6 + stance_missing -0.3） | 进行中（新项目 PRO_20260826_013，账号切换后开训） | TASK_20260826_071 | limxmt8fs1vzhsqpoe@emalupe.com（4291） | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
