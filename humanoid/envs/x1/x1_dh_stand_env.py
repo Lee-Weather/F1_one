@@ -850,9 +850,11 @@ class X1DHStandEnv(LeggedRobot):
         # lifting (low-speed gap 0.4~1.2cm). Uses _smoothed_speed (command EMA,
         # decoupled from actual overspeed). Sigma unchanged: at the lower peak the
         # reward at 2cm rises 0.44 -> 0.60, steepening the low-speed gradient.
+        # unsqueeze(-1): _smoothed_speed is (num_envs,) while feet_z is (num_envs, num_feet);
+        # without it the broadcast fails (dim1: 2 vs 4096) and training crashes at reset.
         peak = 0.045 + 0.02 * torch.clamp(self._smoothed_speed / self.cfg.rewards.cycle_speed_max, max=1.0)
         sigma = 0.035
-        rew_pos = torch.exp(-((feet_z - peak) ** 2) / (2 * sigma ** 2))
+        rew_pos = torch.exp(-((feet_z - peak.unsqueeze(-1)) ** 2) / (2 * sigma ** 2))
         rew_pos = torch.sum(rew_pos * swing_mask, dim=1)
         self.feet_height *= ~contact
         return rew_pos
