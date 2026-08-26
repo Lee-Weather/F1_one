@@ -23,6 +23,7 @@
 | exp2.1 | 2026-08-24 | 摆动参考轨迹加高（knee 0.50/ankle -0.10/hip 0.30，单变量治碎步） | ⚠️ 完成（碎步根治 ✅ 步频 3×→1.0×、短支撑 ~100→11/16、yaw -7.3°；抬腿 P50 1.9cm 贴红线、0.6 段跟踪 64% 触线） | TASK_20260824_144 | limxmsy8q5ux79t3ew@emalupe.com（4236） | czy/data/exp2.1/model_5000.pt |
 | exp2.2 | 2026-08-25 | armature 按真机辨识对齐（膝 3.2×URDF 核心，每关节独立随机化） | ❌ 完成（真机对标价值确认[膝摆幅比 0.35 缺口]，但仿真内超速前扑复发摔 1 次、短支撑反弹 74/82、踝抖 4~6×；需组合轮配套） | TASK_20260825_076 | limxmsy8q5ux79t3ew@emalupe.com（4236） | czy/data/exp2.2/model_5000.pt |
 | exp2.3 | 2026-08-25 | 抬腿专项（clearance 瞬时高斯 1.5 + swing_contact -0.5）+ 踝 Kd 2.5 + 超速分级 | ❌ 完成（抬腿闭环机制验证成功：0.6m/s 段间隙 4.1cm/t(3cm) 58%/中间触地 0，蹭地根治；但验收 REJECT——4 摔同源 yaw 漂移-50°→超速前扑、低速抬腿 2.0cm、步频 1.9×、净前进仅 0.51m；主失效转移为航向漂移） | TASK_20260825_235 | limxmsy8rw775bawr8@emalupe.com（4238） | czy/data/exp2.3/model_5000.pt |
+| exp2.4 | 2026-08-26 | 航向闭环（heading_command=True, ±0.5）+ 参考轨迹 R hip_roll 镜像修复（FK 实证蟹步偏置源） | 进行中（iter 1286/5000，tracking_ang_vel 0.70 健康） | TASK_20260826_046 | limxmsy8rw775bawr8@emalupe.com（4238） | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
@@ -1272,3 +1273,75 @@ run_name=exp2.3，5000 iter 从零，云端 4090D。冻结：armature 对齐、�
 2. 低速抬腿：clearance peak 随速度自适应（低速 0.05），或低速段 swing 相占比加大
 3. R 脚不对称：先回放逐帧定位（起步相位？初始站姿偏差？），再决定是否加对称性奖励
 4. 冻结项继续：armature、踝 Kd 2.5、swing_contact、超速分级（已证明高速段有效）
+
+> **更正（exp2.4 方案细化时发现）**：上条候选 1 中"feet_yaw_align 加强"无效——该项是脚 vs base 的**相对**偏航（foot_yaw - base_yaw），base 转多少脚跟着转，永远"对齐"，治不了世界系漂移。正确路径见 exp2.4 §1 机制分析。
+
+## 实验 exp2.4：航向闭环 + 参考轨迹镜像修复（治漂移-前扑链）
+
+### 1. 上一实验结果与教训
+
+> 数据：exp2.3 回放（4 摔同源归因 + 对称性三层分析 + URDF FK 验证）
+> - 4 摔共同前置：世界系 yaw 漂 -0.22 rad/s → 累积 -1.0 rad → 斜向疾走 2.5 m/s+ → 前扑
+> - 所有跟踪奖励均在 body 系（tracking/lateral/ref_joint_pos），**世界系漂移零成本**
+> - episode 摔倒即重置 yaw 归零，30s 连续累积漂移不在训练分布内——惩罚传不回漂移阶段
+> - 摆动轨迹 R hip_roll 与 L 同号（其余 5 对关节均反号=镜像）：FK 实证 L 摆动 dy=-0.2cm vs R dy=-3.2cm，恒向蟹步偏置；与 R 踝摆幅 0.11×、冲量比 R/L 1.62、双脚外八 +20° 一致
+>
+> **核心教训**：① 奖励体系里没有世界系航向信息，漂移必然免费；② heading 模式基础设施（yaw P 控制器）一直在 env 里，只是 heading_command=False 从未开启；③ 参考轨迹的对称性 bug 要用 FK 验证，肉眼看关节名会漏（45° 斜轴髋链下同名关节两腿轴向不镜像）。
+
+### 2. 本轮修改目标
+
+- 目标1（主目标）：**摔倒 0**（治 yaw 漂移-前扑链）
+- 目标2：段内 yaw 漂移 ≤0.15 rad（红线 >0.3）；净前进 ≥6m/30s（红线 <3m）
+- 目标3（对称性）：冲量比 R/L ≤1.2（红线 >1.4）、R 踝摆幅比 ≥0.5（红线 <0.3）、抬腿 P50 L/R 差 ≤1.5×
+- 目标4（不许回退）：0.6m/s 段间隙 ≥3cm、t(>3cm) ≥40%、中间触地 0
+- 观察项：步频比 ≤1.5×（疑似拐杖步态伴生症状，修不对称后重测）、低速抬腿
+
+### 3. 修改内容（2 主药 + 1 部署同步）
+
+**主药一：开启 heading 闭环**（`x1_dh_stand_config.py`）
+- `heading_command = False → True`；`ranges.heading = [-3.14, 3.14] → [-0.5, 0.5]`（直线行走为主的分布，防转身寻位淹没样本）
+- 机制：env 内置 `_post_physics_step_callback` 每步重算 `ang_vel_yaw_cmd = clip(0.5×wrap(heading_target - yaw), ±1)` → 复用现有 tracking_ang_vel (1.1) 做闭环执行，**不加新奖励项、不动 scales**。漂移 -0.5 rad 时指令变 +0.25 rad/s，不执行即丢 tracking
+
+**主药二：参考轨迹 R hip_roll 镜像修复**（`x1_dh_stand_config.py`）
+- `final_swing_joint_delta_pos[7]：+0.05 → -0.05`（一行，与 default_joint_angles ±0.05 及其余 5 对关节符号约定对齐）
+- FK 验证（czy/analysis/fk_swing_mirror_check.py）：修正后 L/R 摆动脚位移 **(-3.0, -0.2, +4.7) vs (-3.0, +0.2, +4.7) cm 完美镜像**（修正前 R 横向 -3.2cm）
+
+**部署同步：回放脚本取消 heading 覆盖**（`play_adaptive.py`）
+- 删除 `env_cfg.commands.heading_command = False`，回放/真机走同一 yaw P 闭环（FIX_COMMAND 每步置 heading 目标 0 = 保持初始航向）
+- ⚠️ 真机部署侧同理：需自行计算 `cmd_yaw = clip(0.5×wrap(0 - base_yaw), ±1)` 喂入 command_input
+
+**冻结**：armature、踝 Kd 2.5、clearance 高斯 1.5、swing_contact -0.5、超速分级、周期、push 课程、其余 scales——exp2.3 已证明高速段有效，全不动。
+
+### 4. 修改文件
+
+- `x1_dh_stand_config.py`：heading_command/heading range（修改一）、roll 符号（修改二）
+- `play_adaptive.py`：heading 覆盖删除（部署同步）
+- `czy/analysis/fk_swing_mirror_check.py`：FK 镜像验证脚本（新）
+
+### 5. 训练参数
+
+run_name=exp2.4，5000 iter 从零，云端 4090D，commit 3f138b3。
+
+### 6. 预期与验收
+
+| 指标 | exp2.3 | 目标 | 红线 |
+| --- | --- | --- | --- |
+| 摔倒 | 4 | **0** | >0 |
+| 段内 yaw 漂移 | ~-0.5 rad/5s | ≤0.15 rad | >0.3 |
+| 净前进（30s） | 0.51m | ≥6m | <3m |
+| 冲量比 R/L | 1.62 | ≤1.2 | >1.4 |
+| R 踝摆幅比 | 0.11 | ≥0.5 | <0.3 |
+| 抬腿 P50 L/R 差 | 2.5× | ≤1.5× | >2× |
+| 0.6m/s 间隙 / t(3cm) | 4.1cm / 58% | ≥3cm / ≥40% | <2cm / <15% |
+| 中间触地 | 0 | 0 | >0 |
+| 步频比 | 1.9× | ≤1.5×（观察项） | — |
+
+**风险预案（分层回退）**：
+1. heading 模式训练崩 / tracking 奖励大跌 → heading range 收窄 [-0.2, 0.2]；再不行退回 rate 模式 + tracking_ang_vel 1.1→1.6、sigma 5→8（弱闭环版）
+2. roll 反号后 R 摆动过猛触地反弹 → swing_contact -0.5→-0.7（调档不加项）
+3. yaw 闭环开了仍漂 → 漂移源在别处（motor strength/摩擦随机化均值隐性偏置），专项排查
+4. 低速抬腿修不对称后仍 <2cm → exp2.5 加 peak 随 cycle_time 自适应
+
+### 7. 实验结果
+
+待训练完成后补充。
