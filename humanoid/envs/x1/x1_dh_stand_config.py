@@ -374,6 +374,10 @@ class X1DHStandCfg(LeggedRobotCfg):
             feet_contact_number = 2.0
             # exp2.3: cost side of the lift loop - penalize swing-phase ground contact.
             swing_contact = -0.5
+            # exp2.5: complement of swing_contact - penalize stance-phase airborne
+            # (over-cadence bounce signature; 2.06x actual vs reference cycle).
+            # Half weight of swing_contact: light first, escalate later.
+            stance_missing = -0.3
             # gait
             feet_air_time = 1.2
             foot_slip = -0.1

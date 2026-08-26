@@ -286,6 +286,10 @@ class X1DHStandEnv(LeggedRobot):
             target_speed = torch.norm(self.commands[:, :2], dim=1)
             alpha = self.dt / 0.5
             self._smoothed_speed += alpha * (target_speed - self._smoothed_speed)
+            # exp2.5: EMA of actual planar speed for the overspeed termination
+            # (check_termination). tau ~0.25 s at dt=0.02 -> alpha 0.08.
+            actual_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)
+            self._speed_ema += 0.08 * (actual_speed - self._speed_ema)
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
@@ -552,6 +556,8 @@ class X1DHStandEnv(LeggedRobot):
         # exp1.2: reset smoothed speed so a new episode starts with the phase
         # consistent with its freshly sampled command
         self._smoothed_speed[env_ids] = torch.norm(self.commands[env_ids, :2], dim=1)
+        # exp2.5: reset overspeed EMA (fresh episode = fresh speed estimate)
+        self._speed_ema[env_ids] = 0.
         self.reset_buf[env_ids] = 1
         # rand 0 or 0.5
         self.gait_start[env_ids] = torch.randint(0, 2, (len(env_ids),)).to(self.device)*0.5
@@ -605,6 +611,26 @@ class X1DHStandEnv(LeggedRobot):
         # exp1.2: smoothed commanded speed for continuous gait-cycle scaling
         # (EMA updated once per control step in _post_physics_step_callback)
         self._smoothed_speed = torch.zeros(self.num_envs, device=self.device)
+        # exp2.5: EMA (tau ~0.25 s at 50 Hz -> alpha 0.08) of actual planar speed,
+        # used by check_termination overspeed cutoff. Body-frame norm: the replay
+        # failure was a straight-line forward sprint, not a heading issue.
+        self._speed_ema = torch.zeros(self.num_envs, device=self.device)
+
+    def check_termination(self):
+        """exp2.5: extend base termination with an overspeed cutoff.
+
+        exp2.4 replay: both falls were a pure forward sprint on the 0.6 m/s
+        segment (0.7 -> 3.3 m/s within 0.5 s, yaw within +-0.2 rad). The graded
+        low_speed penalty only bites after the 1.2x threshold and the episode
+        ends ~0.5 s later anyway, so the policy never learned to avoid entering
+        the runaway state. Terminating on sustained overspeed turns "never enter
+        runaway" into the strongest early signal. The absolute floor (1.5 m/s)
+        keeps low-speed deceleration glide (0.4~0.8 m/s at cmd 0.2) unharmed.
+        """
+        super().check_termination()
+        overspeed = self._speed_ema > torch.clamp(
+            2.0 * torch.norm(self.commands[:, :2], dim=1), min=1.5)
+        self.reset_buf |= overspeed
 
 # ================================================ Rewards ================================================== #
     def _reward_ref_joint_pos(self):
@@ -839,6 +865,21 @@ class X1DHStandEnv(LeggedRobot):
         force_norm = torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) / 100.
         return torch.sum(force_norm * contact.float() * swing_mask, dim=1)
 
+    def _reward_stance_missing(self):
+        """exp2.5: Penalize the foot being airborne while the gait phase says STANCE.
+
+        Complement of swing_contact: that one punishes "phase=swing but touching",
+        this one punishes "phase=stance but airborne" - the direct signature of
+        the 2.06x over-cadence bounce (seg2 actual cycle 0.38s vs reference
+        0.79s: contact pattern disagrees with phase roughly half the time). A
+        foot supposed to bear weight that is off the ground means the robot is
+        hopping its stance phases, which feeds the forward-impulse runaway.
+        Scale -0.3 = half of swing_contact (light first, escalate later).
+        """
+        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        stance_mask = self._get_stance_mask()
+        return torch.sum((~contact).float() * stance_mask, dim=1)
+
     def _reward_low_speed(self):
         """Reward planar speed tracking and movement direction."""
         command_xy = self.commands[:, :2]
@@ -848,7 +889,9 @@ class X1DHStandEnv(LeggedRobot):
         active_command = command_speed > self.cfg.commands.stand_com_threshold
 
         speed_too_low = actual_speed < 0.5 * command_speed
-        speed_too_high = actual_speed > 1.2 * command_speed
+        # exp2.5: 1.2 -> 1.15 threshold. exp2.4's seg2 mean was 0.76 vs cmd 0.6
+        # (1.27x) - the climb from 1.15x to 1.2x carried zero gradient.
+        speed_too_high = actual_speed > 1.15 * command_speed
         speed_desired = ~(speed_too_low | speed_too_high)
 
         # A negative dot product means that the robot moves opposite to the
@@ -863,8 +906,12 @@ class X1DHStandEnv(LeggedRobot):
         # exp2.2's heavy-knee policy sprinted to 4.2x cmd on the decel segment before
         # falling forward. Linear ramp with excess, capped at -5.0 (1.5x -> -2.5, 2x -> -4.0).
         # NOTE (exp1.11 lesson): do NOT pair with air_time clamping.
-        excess = (actual_speed - 1.2 * command_speed) / torch.clamp(command_speed, min=0.1)
-        overspeed_pen = torch.clamp(-1.0 - 3.0 * excess, min=-5.0)
+        # exp2.5: slope 3.0 -> 6.0, cap -5 -> -8. exp2.4's low_speed converged
+        # POSITIVE (+0.147): the overspeed branch never fired hard enough in the
+        # training distribution, and the 0.6 m/s seg still sprinted to 3.3 m/s.
+        # New ramp: 1.5x -> -2.8, 2x -> -5.8 (capped -8).
+        excess = (actual_speed - 1.15 * command_speed) / torch.clamp(command_speed, min=0.1)
+        overspeed_pen = torch.clamp(-1.0 - 6.0 * excess, min=-8.0)
         reward = torch.where(speed_too_high, overspeed_pen, reward)
         reward[speed_desired] = 1.2
         reward[direction_mismatch] = -2.0
