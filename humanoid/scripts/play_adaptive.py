@@ -185,7 +185,11 @@ def play(args):
                 "randomize_lag_timesteps", "add_lag", "add_dof_lag"]:
         if hasattr(env_cfg.domain_rand, key):
             setattr(env_cfg.domain_rand, key, False)
-    env_cfg.commands.heading_command = False
+    # exp2.4: keep config heading_command=True. The yaw P closed loop lives in
+    # _post_physics_step_callback (ang_vel_yaw = clip(0.5*wrap(heading_target - yaw)));
+    # with FIX_COMMAND overwriting commands[:,3]=0 every step, replay/robot runs the
+    # same hold-heading-zero controller the policy was trained on. Forcing it off
+    # here would feed ang_vel_yaw=0 = "hold current heading" and let drift return.
     env_cfg.noise.curriculum = False
     train_cfg.seed = 12345
 

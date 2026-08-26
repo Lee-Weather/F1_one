@@ -312,7 +312,14 @@ class X1DHStandCfg(LeggedRobotCfg):
                            "stand": [2,3],
                            "walk_omnidirectional": [4,6]}
 
-        heading_command = False  # if true: compute ang vel command from heading error
+        # exp2.4: enable heading closed loop. exp2.3 replay showed all 4 falls share
+        # the same prelude: world-frame yaw drifts -0.22 rad/s until -1.0 rad, then
+        # oblique runaway + overspeed fall. Body-frame rewards see none of it (all
+        # tracking is body-frame; episode resets zero yaw so long-horizon drift is
+        # outside the training distribution). heading mode recomputes ang_vel_yaw
+        # command from heading error every step (_post_physics_step_callback), so the
+        # existing tracking_ang_vel (1.1) becomes the closed-loop controller.
+        heading_command = True  # if true: compute ang vel command from heading error
         stand_com_threshold = 0.05 # if (lin_vel_x, lin_vel_y, ang_vel_yaw).norm < this, robot should stand
         sw_switch = True # use stand_com_threshold or not
 
@@ -320,7 +327,9 @@ class X1DHStandCfg(LeggedRobotCfg):
             lin_vel_x = [-0.4, 0.6] # backward/forward limits [m/s]
             lin_vel_y = [-0.4, 0.4]   # min max [m/s]
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
-            heading = [-3.14, 3.14]
+            # exp2.4: +-pi -> +-0.5. Keep the training distribution straight-walking
+            # dominant; full-circle targets flood samples with turn-and-seek behavior.
+            heading = [-0.5, 0.5]
 
     class rewards:
         soft_dof_pos_limit = 0.98
@@ -337,7 +346,13 @@ class X1DHStandCfg(LeggedRobotCfg):
         # with the old trajectory's ~1.6cm mid-swing clearance, lifting is pure scuffing
         # risk with no reward support. knee 0.35->0.50 (+~4.5cm), ankle -0.16->-0.10
         # (dorsiflexion against toe-dip), hip 0.25->0.30 (stride compensation).
-        final_swing_joint_delta_pos = [0.30, 0.05, -0.11, 0.50, -0.10, 0.0, -0.30, 0.05, 0.11, 0.50, -0.10, 0.0]
+        # exp2.4: R hip_roll +0.05 -> -0.05 (mirror fix). FK on the 45-deg tilted hip
+        # chain (czy/analysis/urdf_roll_check.py) proves all 5 other joint pairs use
+        # opposite-sign = mirrored motion, but same-sign roll moves both feet the SAME
+        # lateral direction (L -4.76mm, R -4.76mm per +0.01rad) -> crab bias baked into
+        # the reference: L swing dy=-0.2cm vs R dy=-3.2cm. Matches exp2.3 asymmetry
+        # (R ankle amplitude 0.11x, impulse ratio R/L 1.62, both feet toe-out +20deg).
+        final_swing_joint_delta_pos = [0.30, 0.05, -0.11, 0.50, -0.10, 0.0, -0.30, -0.05, 0.11, 0.50, -0.10, 0.0]
         target_feet_height = 0.06  # exp1.5: 0.03->0.06 (exp1.4 lift only 5.3cm, band floor too low)
         target_feet_height_max = 0.12  # exp1.5: 0.06->0.12 (unclamp lift ceiling)
         feet_to_ankle_distance = 0.041
