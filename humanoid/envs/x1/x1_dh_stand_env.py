@@ -844,7 +844,13 @@ class X1DHStandEnv(LeggedRobot):
         # exp2.2 proved the old cumulative-height 0/1 band has no gradient under heavy
         # knees: mean swing gap fell to 0.3~1.4cm with 0~2% of frames above 3cm (drag
         # walking). Gaussian pays 0.44 at 2cm -> first direct reward for real clearance.
-        peak = 0.065
+        # exp2.6: peak adapts to the EMA commanded speed (0.045 at standstill ->
+        # 0.065 at 0.6 m/s). Fixed 6.5cm peak was unreachable inside the short
+        # low-speed swing (0.35~0.47s cycle), so exp2.5's policy slid instead of
+        # lifting (low-speed gap 0.4~1.2cm). Uses _smoothed_speed (command EMA,
+        # decoupled from actual overspeed). Sigma unchanged: at the lower peak the
+        # reward at 2cm rises 0.44 -> 0.60, steepening the low-speed gradient.
+        peak = 0.045 + 0.02 * torch.clamp(self._smoothed_speed / self.cfg.rewards.cycle_speed_max, max=1.0)
         sigma = 0.035
         rew_pos = torch.exp(-((feet_z - peak) ** 2) / (2 * sigma ** 2))
         rew_pos = torch.sum(rew_pos * swing_mask, dim=1)

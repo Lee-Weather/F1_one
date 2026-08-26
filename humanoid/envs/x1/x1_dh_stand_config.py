@@ -319,14 +319,22 @@ class X1DHStandCfg(LeggedRobotCfg):
         # outside the training distribution). heading mode recomputes ang_vel_yaw
         # command from heading error every step (_post_physics_step_callback), so the
         # existing tracking_ang_vel (1.1) becomes the closed-loop controller.
-        heading_command = True  # if true: compute ang vel command from heading error
+        # exp2.6: turn it back OFF (user decision). Rationale: (a) the root causes
+        # are cured - roll-mirror fix killed the crab bias, overspeed termination
+        # kills the runaway chain; (b) real-robot deploy is simpler in rate mode
+        # (heading loop needs absolute yaw, IMU yaw integrates drift). COMPENSATION:
+        # ang_vel_yaw range narrowed +-0.6 -> +-0.3 so the rate-mode sampling stays
+        # straight-walking dominant (heading-mode P output was mostly < 0.25 rad/s).
+        # Rollback = one line if drift comes back (acceptance red line 0.6 rad/30s).
+        heading_command = False  # if true: compute ang vel command from heading error
         stand_com_threshold = 0.05 # if (lin_vel_x, lin_vel_y, ang_vel_yaw).norm < this, robot should stand
         sw_switch = True # use stand_com_threshold or not
 
         class ranges:
             lin_vel_x = [-0.4, 0.6] # backward/forward limits [m/s]
             lin_vel_y = [-0.4, 0.4]   # min max [m/s]
-            ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
+            # exp2.6: +-0.6 -> +-0.3 (heading-off compensation, see above)
+            ang_vel_yaw = [-0.3, 0.3]    # min max [rad/s]
             # exp2.4: +-pi -> +-0.5. Keep the training distribution straight-walking
             # dominant; full-circle targets flood samples with turn-and-seek behavior.
             heading = [-0.5, 0.5]
@@ -376,8 +384,11 @@ class X1DHStandCfg(LeggedRobotCfg):
             swing_contact = -0.5
             # exp2.5: complement of swing_contact - penalize stance-phase airborne
             # (over-cadence bounce signature; 2.06x actual vs reference cycle).
-            # Half weight of swing_contact: light first, escalate later.
-            stance_missing = -0.3
+            # exp2.6: -0.3 -> -0.2. Suspected of suppressing the natural swing of
+            # the L foot (L cycle 0.36s vs R 0.56s at seg2: the faster foot walks
+            # straight into the "phase says stance but foot wants to lift" zone).
+            # Lighten one notch; swing_contact -0.5 unchanged (drag-walking cost).
+            stance_missing = -0.2
             # gait
             feet_air_time = 1.2
             foot_slip = -0.1
