@@ -334,7 +334,14 @@ class X1DHStandCfg(LeggedRobotCfg):
             lin_vel_x = [-0.4, 0.6] # backward/forward limits [m/s]
             lin_vel_y = [-0.4, 0.4]   # min max [m/s]
             # exp2.6: +-0.6 -> +-0.3 (heading-off compensation, see above)
-            ang_vel_yaw = [-0.3, 0.3]    # min max [rad/s]
+            # exp2.6: heading off (rate mode). exp2.7: +-0.3 -> +-0.15. At +-0.3
+            # half the samples demanded |yaw rate| > 0.15, giving "splay the hip
+            # yaw" cover as a turning maneuver (the exp2.6 posture collapse).
+            # The heading-mode P controller (the only period with cured drift)
+            # output < 0.1 rad/s in practice - +-0.15 tracks that distribution
+            # and doubles the straight-walk lesson share for yaw_rate_straight
+            # (|cmd| < 0.05 gate: 1/3 of samples vs 1/6 before).
+            ang_vel_yaw = [-0.15, 0.15]    # min max [rad/s]
             # exp2.4: +-pi -> +-0.5. Keep the training distribution straight-walking
             # dominant; full-circle targets flood samples with turn-and-seek behavior.
             heading = [-0.5, 0.5]
@@ -384,11 +391,19 @@ class X1DHStandCfg(LeggedRobotCfg):
             swing_contact = -0.5
             # exp2.5: complement of swing_contact - penalize stance-phase airborne
             # (over-cadence bounce signature; 2.06x actual vs reference cycle).
-            # exp2.6: -0.3 -> -0.2. Suspected of suppressing the natural swing of
-            # the L foot (L cycle 0.36s vs R 0.56s at seg2: the faster foot walks
-            # straight into the "phase says stance but foot wants to lift" zone).
-            # Lighten one notch; swing_contact -0.5 unchanged (drag-walking cost).
-            stance_missing = -0.2
+            # exp2.6: -0.3 -> -0.2 (suspected L-swing suppression) - WRONG call:
+            # the L foot's fast drag cycle was the collapsed hip stance, not a
+            # suppressed swing; lightening only let the duty split widen (72/60%).
+            # exp2.7: back to exp2.5's validated -0.3.
+            stance_missing = -0.3
+            # exp2.7: soft wall on hip_yaw deviation from mirrored default
+            # (deadzone 0.45 rad, quadratic beyond; -1.14/step at exp2.6's L
+            # deviation of 1.52 rad). Cures the static splay-posture collapse.
+            hip_yaw_posture = -1.0
+            # exp2.7: penalize sustained yaw rate under straight commands
+            # (|cmd_wz|<0.05 gate, deadzone 0.08 rad/s on the 0.25 s EMA, cap -1.0).
+            # Cures the free-drift path: exp2.6 spun +19.4 deg/s for 9.6 s.
+            yaw_rate_straight = -0.5
             # gait
             feet_air_time = 1.2
             foot_slip = -0.1

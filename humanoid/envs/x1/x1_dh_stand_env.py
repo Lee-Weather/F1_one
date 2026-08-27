@@ -290,6 +290,8 @@ class X1DHStandEnv(LeggedRobot):
             # (check_termination). tau ~0.25 s at dt=0.02 -> alpha 0.08.
             actual_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)
             self._speed_ema += 0.08 * (actual_speed - self._speed_ema)
+            # exp2.7: EMA of base yaw rate for _reward_yaw_rate_straight (tau 0.25 s).
+            self._wz_ema += 0.08 * (self.base_ang_vel[:, 2] - self._wz_ema)
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
@@ -558,6 +560,8 @@ class X1DHStandEnv(LeggedRobot):
         self._smoothed_speed[env_ids] = torch.norm(self.commands[env_ids, :2], dim=1)
         # exp2.5: reset overspeed EMA (fresh episode = fresh speed estimate)
         self._speed_ema[env_ids] = 0.
+        # exp2.7: reset yaw-rate EMA likewise
+        self._wz_ema[env_ids] = 0.
         self.reset_buf[env_ids] = 1
         # rand 0 or 0.5
         self.gait_start[env_ids] = torch.randint(0, 2, (len(env_ids),)).to(self.device)*0.5
@@ -615,6 +619,12 @@ class X1DHStandEnv(LeggedRobot):
         # used by check_termination overspeed cutoff. Body-frame norm: the replay
         # failure was a straight-line forward sprint, not a heading issue.
         self._speed_ema = torch.zeros(self.num_envs, device=self.device)
+        # exp2.7: EMA (same tau 0.25 s -> alpha 0.08) of base yaw rate, used by
+        # _reward_yaw_rate_straight. Filters single-step touchdown spikes while
+        # leaving sustained rotation fully exposed (exp2.6 drifted +19.4 deg/s
+        # for 9.6 s before the spin fall; instantaneous wz would false-trigger
+        # on normal in-step wobble up to ~0.3 rad/s).
+        self._wz_ema = torch.zeros(self.num_envs, device=self.device)
 
     def check_termination(self):
         """exp2.5: extend base termination with an overspeed cutoff.
@@ -924,6 +934,49 @@ class X1DHStandEnv(LeggedRobot):
         reward[speed_desired] = 1.2
         reward[direction_mismatch] = -2.0
         return reward * active_command
+
+    def _reward_hip_yaw_posture(self):
+        """exp2.7: soft wall on hip_yaw joint deviation from the mirrored default.
+
+        exp2.6 replay proved a STATIC posture local optimum: L hip_yaw locked at
+        +1.0~+1.4 rad from t=0 (default is -0.31; deviation up to 1.74 rad while
+        STANDING), corr(dev_L, wz_ema)=+0.12 ~= 0 -> not a turning actuator but a
+        learned crutch stance. The existing default_joint_pos gaussian
+        exp(-100*norm) saturates to zero gradient beyond ~0.45 rad deviation
+        (exp(-150) at 1.52 rad), so once the policy slides into the splay
+        posture nothing pulls it back. This wall adds a QUADRATIC penalty with a
+        0.45 rad deadzone - zero overlap with the live gaussian inside, an
+        ever-steepening gradient outside (d/dx = -2*(dev-0.45)):
+            dev 0.6  -> -0.02/step    dev 1.0 -> -0.30/step
+            dev 1.52 (exp2.6 L) -> -1.14/step (-5700 over 10 s)
+        Target = mirrored default (L -0.31 / R +0.31) via default_joint_pd_target,
+        NOT zero (exp0.20 lesson: zero target made the robot pirouette).
+        """
+        dev_l = torch.abs(self.dof_pos[:, 2] - self.default_joint_pd_target[:, 2])
+        dev_r = torch.abs(self.dof_pos[:, 8] - self.default_joint_pd_target[:, 8])
+        pen_l = torch.clamp(dev_l - 0.45, min=0.0) ** 2
+        pen_r = torch.clamp(dev_r - 0.45, min=0.0) ** 2
+        return -(pen_l + pen_r)
+
+    def _reward_yaw_rate_straight(self):
+        """exp2.7: penalize sustained yaw rate while the command says go straight.
+
+        With heading_command=False there is NO world-frame heading term: the only
+        yaw constraint is tracking_ang_vel, which compares against a rate command
+        sampled uniformly from +-0.3 - drift stays nearly free (half the samples
+        mask it). exp2.6 spun +19.4 deg/s for 9.6 s (yaw +374 deg total) before
+        the third fall. base wz ~ world yaw rate when upright, so gating on
+        |cmd_wz| < 0.05 (straight-walking lessons, ~1/3 of samples at +-0.15
+        sampling) and penalizing the EMA'd excess directly attacks that failure
+        path. Deadzone 0.08 rad/s (4.6 deg/s) keeps healthy in-step wobble free;
+        cap -1.0 prevents penalty blowup dominating learning (same philosophy as
+        the low_speed graded cap). hip_yaw_posture handles the static side
+        (corr with wz ~ 0), this handles the dynamic side.
+        """
+        straight = torch.abs(self.commands[:, 2]) < 0.05
+        excess = torch.clamp(torch.abs(self._wz_ema) - 0.08, min=0.0)
+        pen = torch.clamp(excess * 2.0, max=1.0)
+        return torch.where(straight, -pen, torch.zeros_like(pen))
     
     def _reward_torques(self):
         """

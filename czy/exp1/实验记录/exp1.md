@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **阶段目标**：验证 `czy/diff` 风格的有参考轨迹 X1 平地行走方案，解决无参考轨迹训练中出现的高频小碎步问题。
-> **当前状态**：exp1 ✅；exp1.1 ✅；exp1.2 ❌；exp1.3 ⚠️；exp1.4 ✅（系列达标）；exp1.5 ⚠️；exp1.6 ✅；exp1.7 ⚠️；exp1.8 ⚠️；exp1.9 ⚠️；exp1.10 ⚠️；exp1.11 ❌（六轮叠加调参失败）。**阶段重置：exp2.0 ⚠️**（稳定性复现 ✅ 但碎步复发 ❌）；**exp2.1 ⚠️**（碎步根治 ✅ 步频 1.0×/短支撑 11/16/yaw -7.3°；抬腿 P50 1.9cm 贴红线、0.6 段 64% 触线）。下一轮 exp2.2：+swing_contact +clearance 重定心（exp1.9 组合）。
+> **当前状态**：exp1 ✅；exp1.1 ✅；exp1.2 ❌；exp1.3 ⚠️；exp1.4 ✅（系列达标）；exp1.5 ⚠️；exp1.6 ✅；exp1.7 ⚠️；exp1.8 ⚠️；exp1.9 ⚠️；exp1.10 ⚠️；exp1.11 ❌（六轮叠加调参失败）。**阶段重置：exp2.0 ⚠️**（稳定性复现 ✅ 但碎步复发 ❌）；**exp2.1 ⚠️**（碎步根治 ✅ 步频 1.0×/短支撑 11/16/yaw -7.3°；抬腿 P50 1.9cm 贴红线、0.6 段 64% 触线）。exp2.2 ❌（armature 对齐引超速复发）；exp2.3 ❌（抬腿闭环机制成但 4 摔，失效转航向漂移）；exp2.4 ⚠️（漂移+不对称根治，剩 2 纯超速摔）；exp2.5 ⚠️（刹车专项 0 摔/跟踪全段 85~102%，代价低速蹭地）；exp2.6 ❌（heading off → yaw +374°/L hip_yaw 塌陷 +1.21 rad/3 摔，REJECT）。下一轮 exp2.7：rate 模式直行三药（hip_yaw 软墙 + 直行门控 yaw-rate 惩罚 + ang_vel_yaw ±0.15）。
 
 | 编号 | 日期 | 摘要 | 状态 | Task ID | GM账号 | checkpoint |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -25,7 +25,8 @@
 | exp2.3 | 2026-08-25 | 抬腿专项（clearance 瞬时高斯 1.5 + swing_contact -0.5）+ 踝 Kd 2.5 + 超速分级 | ❌ 完成（抬腿闭环机制验证成功：0.6m/s 段间隙 4.1cm/t(3cm) 58%/中间触地 0，蹭地根治；但验收 REJECT——4 摔同源 yaw 漂移-50°→超速前扑、低速抬腿 2.0cm、步频 1.9×、净前进仅 0.51m；主失效转移为航向漂移） | TASK_20260825_235 | limxmsy8rw775bawr8@emalupe.com（4238） | czy/data/exp2.3/model_5000.pt |
 | exp2.4 | 2026-08-26 | 航向闭环（heading_command=True, ±0.5）+ 参考轨迹 R hip_roll 镜像修复（FK 实证蟹步偏置源） | ⚠️ 部分成（yaw 漂移根治 ≤0.067 rad、对称性根治 冲量比 0.96/踝 1.07×、高速间隙 6cm/82%；训练 4580 iter 被抢占取 4500；仍 2 摔=纯超速 0.6 档 3.3m/s、步频 2.06×、净前进 3.08m 贴红线） | TASK_20260826_046 | limxmsy8rw775bawr8@emalupe.com（4238） | czy/data/exp2.4/model_4500.pt |
 | exp2.5 | 2026-08-26 | 高速刹车专项（超速终止 EMA>max(1.5,2×cmd) + low_speed 1.15×/slope6 + stance_missing -0.3） | ⚠️ 部分成（主目标全达：摔倒 0[1 次深蹲自恢复]、峰值 3.3→1.86、跟踪全段 85~102% 首次、净前进 3.71m 新高；3893 iter 手动停止取 3800；代价：低速蹭地复发 gap 0.4~1.2cm、0.6 段 L 脚 2.6cm 回退、步频 2.15×） | TASK_20260826_071 | limxmt8fs1vzhsqpoe@emalupe.com（4291） | czy/data/exp2.5/model_3800.pt |
-| exp2.6 | 2026-08-26 | 去航向闭环（heading=False+ang_vel_yaw±0.3）+ clearance peak 速度自适应（4.5~6.5cm）+ stance_missing -0.2 | 代码就绪待训 | 待启动 | limxmt8fs1vzhsqpoe@emalupe.com（4291） | 待训练 |
+| exp2.6 | 2026-08-26 | 去航向闭环（heading=False+ang_vel_yaw±0.3）+ clearance peak 速度自适应（4.5~6.5cm）+ stance_missing -0.2 | ❌ 完成（REJECT：3 摔[yaw 自旋型 1+超速型 2]、yaw 30s +374°、L hip_yaw 塌陷 +1.21 rad、冲量比 0.74、duty 72/60%；0.6 段抬腿达标为唯一亮点；判定"heading 闭环是承重墙"，exp2.7 在 rate 模式内重建直行约束） | TASK_20260826_111（首启 _100 因 clearance peak 广播崩溃，735541a 修复） | limxmt8fs1vzhsqpoe@emalupe.com（4291） | czy/data/exp2.6/model_5000.pt |
+| exp2.7 | 2026-08-27 | rate 模式直行：hip_yaw 软墙 -1.0（阈 0.45rad 线性梯度）+ 直行门控 yaw-rate 惩罚 -0.5 + ang_vel_yaw ±0.15 + stance_missing 回 -0.3 | 代码就绪待训 | 待启动 | limxmt8fs1vzhsqpoe@emalupe.com（4291） | 待训练 |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
@@ -1521,6 +1522,110 @@ run_name=exp2.6，5000 iter 从零，云端 4090D（项目 PRO_20260826_013，�
 2. peak 自适应后高速抬腿塌（0.6 段 gap<3）→ 自适应下限回 0.055
 3. stance_missing 降档后蹦跳/触地恶化 → 回 -0.3，L 脚改对称性奖励专项
 4. 低速 gap 仍 <1.5cm → exp2.7 低速档 clearance 权重 1.5→2.0
+
+### 7. 实验结果（2026-08-26 首启 TASK_20260826_100 崩溃[clearance peak 广播 bug，commit 735541a unsqueeze 修复] + 重训 TASK_20260826_111 完成 5000/5000，6521s + 服务器 10.12.201.5 回放 exp_20260827_091725）
+
+**首次启动崩溃**：`_reward_feet_clearance` 速度自适应 peak 形状 `(num_envs,)` 与 `feet_z` `(num_envs,2)` 右对齐广播冲突（dim1: 2 vs 4096），reset 首步 reward 计算即崩。`peak.unsqueeze(-1)` 修复，语义不变（每 env 一个 peak 双脚共用）。exp2.5 peak 为标量从未暴露。
+
+**回放侧**（czy/analysis/acceptance_exp26.py，固定 500 步分段，复位自动检测）：
+
+| 指标 | exp2.5 | exp2.6 实测 | 验收 | 判定 |
+| --- | --- | --- | --- | --- |
+| 摔倒 | 0 | **3**（t=7.23/11.24/20.88s，均自动复位） | 0 | **✗** |
+| yaw 30s 累计（unwrap） | ≤0.106 rad | **+374°（+6.5 rad）**：含 9.6s 持续 +19.4°/s 左转 | ≤0.3 rad（红线 0.6） | **✗✗** |
+| **hip_yaw 均值 L/R** | — | **+1.21 / -0.13 rad**（L 外撇 60~82°，t=0 起即锁死，贴 ±1.5 极限） | — | **✗ 核心病灶** |
+| 冲量比 R/L | 0.82 | **0.74** | 0.8~1.25 | ✗ |
+| 支撑占空比 L/R | 均衡 | **72% / 60%**（仅L支撑 37% vs 仅R 25%，L 当拐杖） | 差 ≤8pp | ✗ |
+| 抬腿 gap L/R 比 | ~1 | **0.50~0.86 全段**（L 系统性更低） | ≤1.5× | ✗ |
+| 低速段 gap | 0.4~1.2cm | L 1.4~1.5 / R 2.8~2.9cm（L 仍蹭地） | ≥2.0cm（红线 1.0） | ✗ |
+| **0.6 段 gap / t(3cm)** | L 2.6 / R 5.2cm | **L 3.6 / R 4.2cm，t(3cm) 81%** | ≥3cm / ≥40% | **✓ 唯一亮点**（peak 自适应生效） |
+| 净前进（扣复位） | 3.71m | 3.82m | ≥4.5m（红线 3） | ✗ 贴线 |
+| 速度跟踪 | 85~102% | 0.2 段 75~79% / 0.4 段 114~118% / 0.6 段 100~103% | 85~115% | 半✓ |
+| 踝抖零交叉 | — | 154/关节/23s 行走帧 | 观察 | ⚠️ |
+
+**三次摔倒取证**：#1（0.4 段）/#2（0.6 段）纯超速前扑（vx 峰 1.59/1.53 = 指令 4×/2.5×）；#3（0.2 段）**旋转摔倒**：vx 峰 1.87（9×）+ 0.6s 内自旋 350°，前置 9.6s 持续 +19.4°/s 转圈 + 侧向漂移 2.66m——exp2.3"漂移→斜向疾走→前扑"链完整复现。
+
+**根因分析（三层）**：
+
+1. **L 髋 yaw 姿态塌陷（新病灶，结构性源头）**：`_reward_default_joint_pos` 对 hip_yaw 的 `exp(-100·norm)` 高斯在偏差 >0.45 rad 处梯度饱和归零（L 实测偏 1.52 rad 处 exp(-150)≈0）——**锚定存在但已死，滑出即无拉回力**。rate 模式 ±0.3 均匀采样下"髋外撇"成为转弯执行器，策略学成常态偏置。与 exp0.19（移除锚定→漂到极限）/exp0.20（目标 0→转圈）同族教训。
+   **后续判别（hip_asym_check.py）修正定性**：corr(dev_L, dev_R)=+0.09、corr(wz_ema, dev_L)=+0.12 均≈0，且**站立段（cmd=0）dev_L 反而更大（+1.74）**——非"整体旋转联动"亦非"转弯瞬时执行器"，而是**策略收敛到的静态姿态局部最优（L 腿外撇横置当拐杖，seg3 脚朝向 L 73°/R 93° 近垂直前进方向）**；不对称方向（选 L 非 R）为收敛随机性。heading 闭环期间此姿态被 tracking_lin_vel 间接压制（横置脚→运动方向歪→受罚），拔掉后存活。
+2. **漂移免费回归**：heading off 后世界系 yaw 零约束（tracking_ang_vel σ 太软，0.34 rad/s 漂移仅损失 ~0.06 reward/步）；exp2.4 roll 镜像修复不足以独立兜底——判定 **heading 闭环是 exp2.4 漂移根治的承重墙**。
+3. **刹车失 efficacy 为间接损伤**：不对称步态（L 拐杖）蹬地冲量不对称，0.4/0.6 档重现 2.5×+ 失速——exp2.5 刹车三件套（冻结未动）只在健康对称步态下有效。
+
+**结论**：❌ REJECT——用户约束保持 heading=False（真机 rate 模式部署，免 IMU 积分漂移依赖），故 exp2.7 必须在 rate 模式内重建直行约束：斩源头（hip_yaw 软墙补远处梯度）+ 门控瞬时率（直行 yaw-rate 惩罚）+ 收窄采样分布。
+
+三件套归档：`czy/data/exp2.6/`（model_5000.pt / play_output.mp4 47MB / isaac_diag.csv）；分析脚本 czy/analysis/acceptance_exp26.py。
+
+---
+
+## 实验 exp2.7：rate 模式直行专项（hip_yaw 软墙 + 直行门控 + 采样收窄）
+
+### 1. 上一实验结果与教训
+
+> 数据：exp2.6 回放（acceptance_exp26.py）
+> - 3 摔（2 纯超速 + 1 旋转），yaw 30s 累计 +374°，净前进 3.82m
+> - L hip_yaw 全程锁 +1.0~1.4 rad（default -0.31）；冲量比 0.74、duty 72/60%、抬腿 L/R 0.5~0.86
+> - 0.6 段 peak 自适应生效（L gap 3.6cm / t3cm 81%）
+>
+> **核心教训**：
+> - 姿态锚定高斯 `exp(-100x)` 大偏差处梯度饱和——惩罚必须有远处梯度（exp2.5 超速分级同哲学）
+> - 漂移的结构性发生器 = 髋 yaw 姿态偏置；拔掉 heading 后世界系约束只剩 tracking_ang_vel 一项且太软
+> - 用户约束：真机部署 rate 模式（无绝对 yaw 依赖），heading 回滚排除——须在 rate 模式内解决
+
+### 2. 本轮修改目标
+
+- 目标1（红线）：摔倒 0；yaw 30s 累计 ≤0.3 rad 且无 >0.1 rad/s 持续 >2s 段（红线 >0.6 rad）
+- 目标2（病灶）：hip_yaw 均值 |L|、|R| ≤0.45 rad（红线 >0.8）；duty 差 ≤8pp（红线 >15pp）；冲量比 0.8~1.25（红线 <0.7）
+- 目标3（不许回退）：0.6 段 gap ≥3cm / t3cm ≥40%；低速 gap ≥2.0cm（exp2.6 未竟目标，红线 <1.0）
+- 目标4：速度跟踪 85~115%、净前进 ≥4.5m（红线 3）；训练 episode ≥1500（红线 <500）
+
+### 3. 修改内容（3 主药 + 1 回滚，单主题：rate 模式直行）
+
+**主药一：`_reward_hip_yaw_posture` 软墙（治塌陷源头）**
+- `pen = clamp(|dof2-(-0.31)|-0.45, 0)² + clamp(|dof8-0.31|-0.45, 0)²`，scale **-1.0**
+- 梯度预算：dev=0.6→-0.02/步、dev=1.0→-0.30/步、dev=1.52（exp2.6 实测 L）→**-1.14/步**（10s -1140，强拉回）；dev<0.45 零惩罚
+- 理由：default_joint_pos 高斯在 0.45 外已死（exp(-100·0.45)≈0），软墙补上远处二次梯度，两奖励零重叠区；目标用镜像 default（±0.31）非 0（exp0.20 教训：目标 0 曾致转圈）
+
+**主药二：`_reward_yaw_rate_straight` 直行门控（治漂移）**
+- `|cmd_wz|<0.05` 门控下 `pen = clamp(|wz_ema|-0.08, 0)·2.0`，cap -1.0，scale **-0.5**
+- `wz_ema`：τ=0.25s EMA（复用 _speed_ema buffer 模式，init/callback 更新/reset 清零）
+- 理由：base wz ≈ 世界系 yaw 率（近直立），这是 rate 模式下唯一可得的世界系信号；exp2.6 漂移 0.33 rad/s → -0.25/步（10s -250）；deadzone 0.08 rad/s（4.6°/s）不误伤步内正常晃动；EMA 滤掉单步冲击瞬时值
+
+**主药三：ang_vel_yaw 采样 ±0.3 → ±0.15**
+- 理由：±0.3 均匀分布一半样本 |cmd|>0.15，"转大弯"占比远超真机直线场景；heading 模式 P 控制器实际输出多 <0.1 rad/s，±0.15 贴近部署分布，降低策略把姿态偏置当转弯工具的训练压力
+
+**回滚：stance_missing -0.2 → -0.3**（exp2.5 值；exp2.6 降档后 duty 分裂加剧的对应回退）
+
+**冻结**：超速终止（EMA>max(1.5,2×cmd)）+ low_speed 1.15×/slope6/cap-8、roll 镜像、armature、踝 Kd 2.5、clearance peak 自适应 + 权重 1.5、swing_contact -0.5、周期映射、push 课程。
+
+### 4. 修改文件
+
+- `x1_dh_stand_env.py`：`_reward_hip_yaw_posture`、`_reward_yaw_rate_straight` 新函数 + `_wz_ema` buffer（`_init_buffers`/`_post_physics_step_callback`/reset）
+- `x1_dh_stand_config.py`：`scales.hip_yaw_posture=-1.0`、`scales.yaw_rate_straight=-0.5`、`ang_vel_yaw=[-0.15,0.15]`、`stance_missing=-0.3`
+
+### 5. 训练参数
+
+run_name=exp2.7，5000 iter 从零，云端 4090D（项目 PRO_20260826_013，账号 4291）。
+
+### 6. 预期与验收
+
+| 指标 | exp2.6 | 目标 | 红线 |
+| --- | --- | --- | --- |
+| 摔倒 | 3 | **0** | >0 |
+| yaw 30s 累计 | +6.5 rad | ≤0.3 rad 且无 >0.1 rad/s 持续段 | >0.6 rad |
+| hip_yaw 均值 \|L\|/\|R\| | 1.21 / 0.13 | ≤0.45 rad | >0.8 rad |
+| duty 差 / 冲量比 | 12pp / 0.74 | ≤8pp / 0.8~1.25 | >15pp / <0.7 |
+| 低速 gap | 1.4~1.5cm(L) | ≥2.0cm | <1.0cm |
+| 0.6 段 gap / t3cm | 3.6~4.2cm / 81% | ≥3cm / ≥40% | <2cm / <15% |
+| 跟踪 / 净前进 | 75~118% / 3.82m | 85~115% / ≥4.5m | <80% / <3m |
+| episode | — | ≥1500 | <500 |
+
+**风险预案（分层回退）**：
+1. 软墙太强（episode 掉/转弯僵直）→ 阈 0.45→0.6 或权重 -1.0→-0.5
+2. 直行门控误伤正常步态 → deadzone 0.08→0.12 或 EMA τ 0.25→0.5s
+3. ±0.15 转弯指令跟踪差 → 接受（直线阶段），记入笔记
+4. 仍漂 >0.6 rad → 排查域随机化均值隐性偏置（motor strength/摩擦）；若确认 rate 模式不可行，携数据提请用户决策（heading 回滚为最后手段）
+5. 0.6 档前扑复发 → 超速终止阈 2.0×→1.8×（不动 low_speed 斜率）
 
 ### 7. 实验结果
 
