@@ -62,7 +62,7 @@ class X1DHStandCfg(LeggedRobotCfg):
     class asset(LeggedRobotCfg.asset):
         # The diff snapshot referenced an older asset name that is not present
         # in this workspace; keep the current X1 12-DOF asset path.
-        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/x1/urdf/X1_12DOF.urdf'
+        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/x1/urdf/X1_12DOF_physically_mirrored.urdf'
         xml_file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/x1/mjcf/xyber_x1_flat.xml'
 
         name = "x1"
@@ -137,8 +137,15 @@ class X1DHStandCfg(LeggedRobotCfg):
             'right_hip_pitch_joint': -0.4,
             'right_hip_roll_joint': -0.05,
             'right_hip_yaw_joint': 0.31,
+            # exp2.8 URDF switch (physically_mirrored): ONLY right_ankle_pitch
+            # axis was flipped upstream (0,0,1)->(0,0,-1), self-consistent, so its
+            # sign inverts (-0.21 -> +0.21) to keep the same physical pose
+            # (FK-verified: foot CoM mirrors the left at +0.21). The upstream right
+            # knee limit flip [-2,0] shipped with an UNCHANGED axis = inconsistent;
+            # we restored the URDF limit to [0,2] and keep q=+0.49 (no flip).
+            # hip_yaw axes unchanged -> no flips.
             'right_knee_pitch_joint': 0.49,
-            'right_ankle_pitch_joint': -0.21, 
+            'right_ankle_pitch_joint': 0.21,
             'right_ankle_roll_joint': 0.0,
         }
 
@@ -367,7 +374,12 @@ class X1DHStandCfg(LeggedRobotCfg):
         # lateral direction (L -4.76mm, R -4.76mm per +0.01rad) -> crab bias baked into
         # the reference: L swing dy=-0.2cm vs R dy=-3.2cm. Matches exp2.3 asymmetry
         # (R ankle amplitude 0.11x, impulse ratio R/L 1.62, both feet toe-out +20deg).
-        final_swing_joint_delta_pos = [0.30, 0.05, -0.11, 0.50, -0.10, 0.0, -0.30, -0.05, 0.11, 0.50, -0.10, 0.0]
+        # exp2.8 URDF switch: ONLY the R ankle_pitch sign flips (axis inverted
+        # upstream, self-consistent). R knee keeps +0.50 - its upstream limit flip
+        # shipped with an unchanged axis and was restored in the URDF.
+        # Same physical swing as exp2.7: L [+hip_p,+hip_r,-hip_y,+knee,-ank_p,0],
+        # R [-hip_p,-hip_r,+hip_y,+knee,+ank_p,0].
+        final_swing_joint_delta_pos = [0.30, 0.05, -0.11, 0.50, -0.10, 0.0, -0.30, -0.05, 0.11, 0.50, 0.10, 0.0]
         target_feet_height = 0.06  # exp1.5: 0.03->0.06 (exp1.4 lift only 5.3cm, band floor too low)
         target_feet_height_max = 0.12  # exp1.5: 0.06->0.12 (unclamp lift ceiling)
         feet_to_ankle_distance = 0.041
