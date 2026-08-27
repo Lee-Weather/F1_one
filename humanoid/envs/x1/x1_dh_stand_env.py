@@ -920,18 +920,15 @@ class X1DHStandEnv(LeggedRobot):
 
         reward = torch.zeros_like(actual_speed)
         reward[speed_too_low] = -1.0
-        # exp2.3: graded overspeed penalty. Flat -1.0 gave no gradient beyond 1.2x cmd;
-        # exp2.2's heavy-knee policy sprinted to 4.2x cmd on the decel segment before
-        # falling forward. Linear ramp with excess, capped at -5.0 (1.5x -> -2.5, 2x -> -4.0).
-        # NOTE (exp1.11 lesson): do NOT pair with air_time clamping.
-        # exp2.5: slope 3.0 -> 6.0, cap -5 -> -8. exp2.4's low_speed converged
-        # POSITIVE (+0.147): the overspeed branch never fired hard enough in the
-        # training distribution, and the 0.6 m/s seg still sprinted to 3.3 m/s.
-        # New ramp: 1.5x -> -2.8, 2x -> -5.8 (capped -8).
+        # exp2.9 walking-deburden (Plan C): graded overspeed penalty softened back.
+        # slope6/cap-8 was exp2.5's anti-sprint wall; with the EMA termination still
+        # guarding the tail, the ramp only needs to damp the climb: 1.5x -> -2.5,
+        # 2x -> -4.0 (capped -5). In-band reward raised 1.2 -> 1.5 below to fatten
+        # the payoff of staying inside the band (restore walking economics).
         excess = (actual_speed - 1.15 * command_speed) / torch.clamp(command_speed, min=0.1)
-        overspeed_pen = torch.clamp(-1.0 - 6.0 * excess, min=-8.0)
+        overspeed_pen = torch.clamp(-1.0 - 3.0 * excess, min=-5.0)
         reward = torch.where(speed_too_high, overspeed_pen, reward)
-        reward[speed_desired] = 1.2
+        reward[speed_desired] = 1.5
         reward[direction_mismatch] = -2.0
         return reward * active_command
 
@@ -974,8 +971,10 @@ class X1DHStandEnv(LeggedRobot):
         (corr with wz ~ 0), this handles the dynamic side.
         """
         straight = torch.abs(self.commands[:, 2]) < 0.05
-        excess = torch.clamp(torch.abs(self._wz_ema) - 0.08, min=0.0)
-        pen = torch.clamp(excess * 2.0, max=1.0)
+        # exp2.9: deadzone 0.08 -> 0.03 (exp2.7 hid its drift at 0.049, just under
+        # the old deadzone); slope 2 -> 3 steepens the climb-out gradient.
+        excess = torch.clamp(torch.abs(self._wz_ema) - 0.03, min=0.0)
+        pen = torch.clamp(excess * 3.0, max=1.0)
         return torch.where(straight, -pen, torch.zeros_like(pen))
     
     def _reward_torques(self):

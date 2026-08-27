@@ -160,7 +160,7 @@ class X1DHStandCfg(LeggedRobotCfg):
         # 178~277. Kp 35 with J~0.005 gives damping ratio <0.1 at Kd 0.5 -> ~0.5 at 2.5.
         # DEPLOY SIDE: must sync the same Kd on the robot (verify thermals first).
         damping = {'hip_pitch_joint': 3, 'hip_roll_joint': 3.0,'hip_yaw_joint': 4,
-                   'knee_pitch_joint': 10, 'ankle_pitch_joint': 2.5, 'ankle_roll_joint': 2.5}
+                   'knee_pitch_joint': 8, 'ankle_pitch_joint': 2.5, 'ankle_roll_joint': 2.5}
 
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.5
@@ -399,22 +399,26 @@ class X1DHStandCfg(LeggedRobotCfg):
             # gaussian now pays real gradient at low heights (0.44 at 2cm).
             feet_clearance = 1.5
             feet_contact_number = 2.0
-            # exp2.3: cost side of the lift loop - penalize swing-phase ground contact.
-            swing_contact = -0.5
-            # exp2.5: complement of swing_contact - penalize stance-phase airborne
-            # (over-cadence bounce signature; 2.06x actual vs reference cycle).
-            # exp2.6: -0.3 -> -0.2 (suspected L-swing suppression) - WRONG call:
-            # the L foot's fast drag cycle was the collapsed hip stance, not a
-            # suppressed swing; lightening only let the duty split widen (72/60%).
-            # exp2.7: back to exp2.5's validated -0.3.
-            stance_missing = -0.3
-            # exp2.7: soft wall on hip_yaw deviation from mirrored default
-            # (deadzone 0.45 rad, quadratic beyond; -1.14/step at exp2.6's L
-            # deviation of 1.52 rad). Cures the static splay-posture collapse.
+            # exp2.9 Plan C walking-deburden: swing cost relaxed back to the
+            # exp1.10-validated notch (-0.3 kept mid-swing touches at ~8/foot in
+            # exp1.9 terms while unfreezing 0.8-seg tracking +72%->88%). Fallback:
+            # single-revert to -0.5 if mid-swing touches rebound >15/foot.
+            swing_contact = -0.3
+            # exp2.9: stance_missing REMOVED. Weakest-evidence brake (added exp2.5
+            # for bounce cadence already covered by feet_contact_number w=2.0);
+            # sim value was a negligible -0.02~0.04 tax yet it narrowed the
+            # exploration envelope feeding the splay collapse. foot_slip +
+            # feet_contact_forces still punish true drag.
+            # exp2.9: feet_clearance 1.5->1.2 (independent revert item): with the
+            # instantaneous gaussian gradient present, the extra push amplified
+            # single-support instability; drag watch-metric gates fallback to 1.5.
+            feet_clearance = 1.2
+            # exp2.9 KEEP (background guardrails from exp2.7, unchanged): soft wall
+            # on hip_yaw deviation + straight-gate yaw-rate penalty with TIGHTENED
+            # deadzone 0.08 -> 0.03 rad/s (exp2.7 drift optimized INTO the old
+            # deadzone at 0.049; slope 2->3). No longer primary cures - the
+            # economics do that - but they keep taxing residual splay/drift.
             hip_yaw_posture = -1.0
-            # exp2.7: penalize sustained yaw rate under straight commands
-            # (|cmd_wz|<0.05 gate, deadzone 0.08 rad/s on the 0.25 s EMA, cap -1.0).
-            # Cures the free-drift path: exp2.6 spun +19.4 deg/s for 9.6 s.
             yaw_rate_straight = -0.5
             # gait
             feet_air_time = 1.2
