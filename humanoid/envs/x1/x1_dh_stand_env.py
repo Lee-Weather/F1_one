@@ -394,7 +394,46 @@ class X1DHStandEnv(LeggedRobot):
     def step(self, actions):
         if self.cfg.env.use_ref_actions:
             actions += self.ref_action
+        # exp2.11: structural anti-splay clamp on the composed PD target
+        actions = self._clamp_anti_splay_actions(actions)
         return super().step(actions)
+
+    def _clamp_anti_splay_actions(self, actions):
+        """exp2.11 (structural Plan B, pre-registered stop-loss): hard-clamp the
+        PD position target of the two joints every reward-side cure failed to
+        protect.
+
+        History - four consecutive reward-side failures: exp2.7 parked one hip
+        at the +-1.5 limit paying the deadzone-wall tax; exp2.9 used the other
+        hip as a rudder at -1.49 under the economics route; exp2.10 pinned BOTH
+        hips at +1.5 in a twisted wide squat while collecting the ungated cos
+        income at +0.92/step (the income itself was the hack surface). The
+        45-deg oblique hip geometry lets a limit-pinned hip_yaw spread the leg
+        for a huge support polygon while the FOOT still points forward - so
+        every foot-frame reward pays the cheat pose full marks.
+
+        PD target = default + action_scale * action (use_ref_actions=False,
+        action_scale=0.5), so clamping the action clamps the target exactly:
+            hip_yaw   (idx 2, 8):  target in [-0.85, +0.85] rad
+              defaults -0.31/+0.31, healthy gait |q| < 0.35, swing delta +-0.11
+              fits comfortably; ALL documented cheats live at +-1.4~1.5.
+            ankle_roll (idx 5, 11): target in [-0.40, +0.40] rad
+              default 0, healthy |q| < 0.25; exp2.8 L pinned -0.645, exp2.10
+              L -0.61 / R +0.58 were riding the +-0.64 joint limits.
+        No deadzone; applies during stand/walk/turn alike. self.actions is
+        assigned AFTER this clamp in super().step(), so the observation and
+        the stored action stay consistent with what was actually commanded.
+        torch.minimum/maximum (NOT clamp-with-tensor-bounds: torch 1.12 lack).
+        """
+        actions = actions.clone()
+        a_scale = self.cfg.control.action_scale
+        for idx, lo_q, hi_q in ((2, -0.85, 0.85), (8, -0.85, 0.85),
+                                (5, -0.40, 0.40), (11, -0.40, 0.40)):
+            lo_a = (lo_q - self.default_joint_pd_target[:, idx]) / a_scale
+            hi_a = (hi_q - self.default_joint_pd_target[:, idx]) / a_scale
+            a = torch.maximum(actions[:, idx], lo_a)
+            actions[:, idx] = torch.minimum(a, hi_a)
+        return actions
 
     def compute_observations(self):
 
@@ -562,6 +601,9 @@ class X1DHStandEnv(LeggedRobot):
         self._speed_ema[env_ids] = 0.
         # exp2.7: reset yaw-rate EMA likewise
         self._wz_ema[env_ids] = 0.
+        # exp2.11: reset eviction counters (splay / no-progress)
+        self._splay_steps[env_ids] = 0
+        self._stall_steps[env_ids] = 0
         self.reset_buf[env_ids] = 1
         # rand 0 or 0.5
         self.gait_start[env_ids] = torch.randint(0, 2, (len(env_ids),)).to(self.device)*0.5
@@ -619,6 +661,10 @@ class X1DHStandEnv(LeggedRobot):
         # used by check_termination overspeed cutoff. Body-frame norm: the replay
         # failure was a straight-line forward sprint, not a heading issue.
         self._speed_ema = torch.zeros(self.num_envs, device=self.device)
+        # exp2.11: consecutive-step counters for the splay / no-progress
+        # evictions (check_termination); reset per episode in reset_idx.
+        self._splay_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self._stall_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         # exp2.7: EMA (same tau 0.25 s -> alpha 0.08) of base yaw rate, used by
         # _reward_yaw_rate_straight. Filters single-step touchdown spikes while
         # leaving sustained rotation fully exposed (exp2.6 drifted +19.4 deg/s
@@ -636,11 +682,41 @@ class X1DHStandEnv(LeggedRobot):
         the runaway state. Terminating on sustained overspeed turns "never enter
         runaway" into the strongest early signal. The absolute floor (1.5 m/s)
         keeps low-speed deceleration glide (0.4~0.8 m/s at cmd 0.2) unharmed.
+
+        exp2.11 adds two evictions (structural Plan B): splay (hip_yaw dev
+        > 0.9 rad for 5 steps) and no-progress (cmd_x > 0.3 while speed EMA
+        < 0.05 m/s for 150 steps) - see inline comments for the history.
         """
         super().check_termination()
         overspeed = self._speed_ema > torch.clamp(
             2.0 * torch.norm(self.commands[:, :2], dim=1), min=1.5)
         self.reset_buf |= overspeed
+
+        # exp2.11: splay eviction - either hip_yaw deviating > 0.9 rad from its
+        # mirrored default for 5 consecutive steps (0.1 s). With the +-0.85
+        # target clamp the reachable dev is [-0.54, +1.16] (L) / [-1.16, +0.54]
+        # (R): each leg has exactly ONE direction that can still cross 0.9
+        # (L: q > +0.59, R: q < -0.59) - precisely the two documented cheat
+        # directions (exp2.9 R rudder at -1.49, exp2.10 both-hips +1.5 twist).
+        # The clamp corridor [0.59, 0.85] becomes pass-through, not livable.
+        dev_l = torch.abs(self.dof_pos[:, 2] - self.default_joint_pd_target[:, 2])
+        dev_r = torch.abs(self.dof_pos[:, 8] - self.default_joint_pd_target[:, 8])
+        splay = (dev_l > 0.9) | (dev_r > 0.9)
+        self._splay_steps = torch.where(splay, self._splay_steps + 1,
+                                        torch.zeros_like(self._splay_steps))
+        self.reset_buf |= self._splay_steps >= 5
+
+        # exp2.11: no-progress eviction - commanded to walk (|cmd_x| > 0.3) but
+        # the planar speed EMA stays under 0.05 m/s for 150 steps (3 s).
+        # Directly executes the exp2.10 twisted squat (cmd 0.6, vx ~ 0, frozen
+        # 30 s) and would have caught the exp1.2 lazy collapse too. Safety:
+        # healthy acceleration takes < 0.5 s vs the 3 s window (6x margin);
+        # cmd 0.2 / 0.0 are exempt; push-recovery pauses are < 1 s; early
+        # training episodes die to falls in ~2 s before this can ever fire.
+        stalled = (torch.abs(self.commands[:, 0]) > 0.3) & (self._speed_ema < 0.05)
+        self._stall_steps = torch.where(stalled, self._stall_steps + 1,
+                                        torch.zeros_like(self._stall_steps))
+        self.reset_buf |= self._stall_steps >= 150
 
 # ================================================ Rewards ================================================== #
     def _reward_ref_joint_pos(self):
@@ -1071,7 +1147,18 @@ class X1DHStandEnv(LeggedRobot):
                                1.0 - 2.0 * (base_quat[:, 1] * base_quat[:, 1] + base_quat[:, 2] * base_quat[:, 2]))
         rel = foot_yaw - base_yaw.unsqueeze(-1)
         rel = torch.atan2(torch.sin(rel), torch.cos(rel))  # wrap to [-pi, pi]
-        return torch.cos(rel).mean(dim=1)
+        # exp2.11: MOVEMENT GATE. exp2.10 collapsed into a twisted wide squat
+        # whose FEET pointed only 23 deg off forward - the ungated income paid
+        # +0.92/step for standing still and became the dominant attractor.
+        # Lesson #4: an unconditional positive income stream always creates a
+        # stand-still basin. Gate by achieved/commanded speed: standing pays 0,
+        # walking at cmd pays full. To farm this income the policy must
+        # actually walk - and actually walking also earns every speed reward,
+        # so there is no arbitrage left.
+        move_factor = torch.clamp(
+            torch.abs(self.base_lin_vel[:, 0]) /
+            torch.clamp(torch.abs(self.commands[:, 0]), min=0.15), max=1.0)
+        return torch.cos(rel).mean(dim=1) * move_factor
 
     def _reward_lateral_vel(self):
         """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
