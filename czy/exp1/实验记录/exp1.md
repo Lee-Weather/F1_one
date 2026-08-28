@@ -3,7 +3,7 @@
 ## 实验索引
 
 > **阶段目标**：验证 `czy/diff` 风格的有参考轨迹 X1 平地行走方案，解决无参考轨迹训练中出现的高频小碎步问题。
-> **当前状态**：exp1 ✅；exp1.1 ✅；exp1.2 ❌；exp1.3 ⚠️；exp1.4 ✅（系列达标）；exp1.5 ⚠️；exp1.6 ✅；exp1.7 ⚠️；exp1.8 ⚠️；exp1.9 ⚠️；exp1.10 ⚠️；exp1.11 ❌（六轮叠加调参失败）。**阶段重置：exp2.0 ⚠️**（稳定性复现 ✅ 但碎步复发 ❌）；**exp2.1 ⚠️**（碎步根治 ✅ 步频 1.0×/短支撑 11/16/yaw -7.3°；抬腿 P50 1.9cm 贴红线、0.6 段 64% 触线）。exp2.2 ❌（armature 对齐引超速复发）；exp2.3 ❌（抬腿闭环机制成但 4 摔，失效转航向漂移）；exp2.4 ⚠️（漂移+不对称根治，剩 2 纯超速摔）；exp2.5 ⚠️（刹车专项 0 摔/跟踪全段 85~102%，代价低速蹭地）；exp2.6 ❌（heading off → yaw +374°/L hip_yaw 塌陷 +1.21 rad/3 摔，REJECT）。下一轮 exp2.7：rate 模式直行三药（hip_yaw 软墙 + 直行门控 yaw-rate 惩罚 + ang_vel_yaw ±0.15）。
+> **当前状态**：exp2.9 速度经济学大胜但分腿未治（R髋锁限）；**现训 exp2.10**（纯奖励治分腿）。exp1 ✅；exp1.1 ✅；exp1.2 ❌；exp1.3 ⚠️；exp1.4 ✅（系列达标）；exp1.5 ⚠️；exp1.6 ✅；exp1.7 ⚠️；exp1.8 ⚠️；exp1.9 ⚠️；exp1.10 ⚠️；exp1.11 ❌（六轮叠加调参失败）。**阶段重置：exp2.0 ⚠️**（稳定性复现 ✅ 但碎步复发 ❌）；**exp2.1 ⚠️**（碎步根治 ✅ 步频 1.0×/短支撑 11/16/yaw -7.3°；抬腿 P50 1.9cm 贴红线、0.6 段 64% 触线）。exp2.2 ❌（armature 对齐引超速复发）；exp2.3 ❌（抬腿闭环机制成但 4 摔，失效转航向漂移）；exp2.4 ⚠️（漂移+不对称根治，剩 2 纯超速摔）；exp2.5 ⚠️（刹车专项 0 摔/跟踪全段 85~102%，代价低速蹭地）；exp2.6 ❌（heading off → yaw +374°/L hip_yaw 塌陷 +1.21 rad/3 摔，REJECT）。下一轮 exp2.7：rate 模式直行三药（hip_yaw 软墙 + 直行门控 yaw-rate 惩罚 + ang_vel_yaw ±0.15）。
 
 | 编号 | 日期 | 摘要 | 状态 | Task ID | GM账号 | checkpoint |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -27,7 +27,9 @@
 | exp2.5 | 2026-08-26 | 高速刹车专项（超速终止 EMA>max(1.5,2×cmd) + low_speed 1.15×/slope6 + stance_missing -0.3） | ⚠️ 部分成（主目标全达：摔倒 0[1 次深蹲自恢复]、峰值 3.3→1.86、跟踪全段 85~102% 首次、净前进 3.71m 新高；3893 iter 手动停止取 3800；代价：低速蹭地复发 gap 0.4~1.2cm、0.6 段 L 脚 2.6cm 回退、步频 2.15×） | TASK_20260826_071 | limxmt8fs1vzhsqpoe@emalupe.com（4291） | czy/data/exp2.5/model_3800.pt |
 | exp2.6 | 2026-08-26 | 去航向闭环（heading=False+ang_vel_yaw±0.3）+ clearance peak 速度自适应（4.5~6.5cm）+ stance_missing -0.2 | ❌ 完成（REJECT：3 摔[yaw 自旋型 1+超速型 2]、yaw 30s +374°、L hip_yaw 塌陷 +1.21 rad、冲量比 0.74、duty 72/60%；0.6 段抬腿达标为唯一亮点；判定"heading 闭环是承重墙"，exp2.7 在 rate 模式内重建直行约束） | TASK_20260826_111（首启 _100 因 clearance peak 广播崩溃，735541a 修复） | limxmt8fs1vzhsqpoe@emalupe.com（4291） | czy/data/exp2.6/model_5000.pt |
 | exp2.7 | 2026-08-27 | rate直行（髋yaw软墙+直行门控+±0.15+stance_missing-0.3）| ⚠️完成（iter3079暂停user/m3000：零摔倒、对称回归、漂移+374°→-84°改善；但髋yaw软墙零生效[双腿外撇~90°]、0.6段51%欠速）| TASK_20260827_033 | limxmt8fs1vzhsqpoe（4291） | exp2.7/model_3000.pt |
-| exp2.8 | 2026-08-27 | URDF 切换验证（physically_mirrored：膝质心修正+32 mesh 补齐+踝符号翻转+膝限位修正+路径修复；奖励结构冻结） | ⚠️暂存（iter2659提前终止未收敛[reward~60, ep~1050]，回放8摔/yaw失控自旋/倒退-5.27m；URDF加载已验正常，教训=新URDF收敛慢需续训，代码保留待下轮与结构性治外撇合并训）| TASK_20260827_101 | limxmt8fs1vzhsqpoe（4291） | exp2.8/model_2600.pt |
+| exp2.8 | 2026-08-27 | URDF 切换验证（physically_mirrored：膝质心修正+32 mesh 补齐+踝符号翻转+膝限位修正+路径修复；奖励结构冻结）
+| exp2.9 | 2026-08-27 | 行走减负（方案C：low_speed带内1.5+slope3/cap5、swing-0.3、删stance_missing、clearance1.2、膝Kd8） | ⚠️部分成（速度经济学大胜：0摔、0.6段97%、对称0.92/8pp；分腿未治❌R髋锁限-1.5达82%帧+漂移-49°再藏死区；见笔记）| TASK_20260827_200 | limxmt8fv20vhquhe7（4292） | exp2.9/model_5000.pt |
+| exp2.10 | 2026-08-28 | 纯奖励治分腿（无强制位置限制：feet_heading_align余弦收入流+软墙去死区+wz死区归零+退役feet_yaw_align） | 训练中 | 待启动 | limxmt8fv20vhquhe7（4292） | 待定 | | ⚠️暂存（iter2659提前终止未收敛[reward~60, ep~1050]，回放8摔/yaw失控自旋/倒退-5.27m；URDF加载已验正常，教训=新URDF收敛慢需续训，代码保留待下轮与结构性治外撇合并训）| TASK_20260827_101 | limxmt8fs1vzhsqpoe（4291） | exp2.8/model_2600.pt |
 
 ## 实验 exp1：恢复有参考轨迹的 X1 行走算法
 
