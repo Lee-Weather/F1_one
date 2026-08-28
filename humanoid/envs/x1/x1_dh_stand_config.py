@@ -395,9 +395,6 @@ class X1DHStandCfg(LeggedRobotCfg):
         
         class scales:
             ref_joint_pos = 2.2
-            # exp2.3: 1.0->1.5. Lift height is THE target this round (drag-walking cure);
-            # gaussian now pays real gradient at low heights (0.44 at 2cm).
-            feet_clearance = 1.5
             feet_contact_number = 2.0
             # exp2.9 Plan C walking-deburden: swing cost relaxed back to the
             # exp1.10-validated notch (-0.3 kept mid-swing touches at ~8/foot in
@@ -413,12 +410,17 @@ class X1DHStandCfg(LeggedRobotCfg):
             # instantaneous gaussian gradient present, the extra push amplified
             # single-support instability; drag watch-metric gates fallback to 1.5.
             feet_clearance = 1.2
-            # exp2.9 KEEP (background guardrails from exp2.7, unchanged): soft wall
-            # on hip_yaw deviation + straight-gate yaw-rate penalty with TIGHTENED
-            # deadzone 0.08 -> 0.03 rad/s (exp2.7 drift optimized INTO the old
-            # deadzone at 0.049; slope 2->3). No longer primary cures - the
-            # economics do that - but they keep taxing residual splay/drift.
-            hip_yaw_posture = -1.0
+            # exp2.10 reward-guided anti-splay (NO forced position limits):
+            # 1) feet_heading_align: cos-shaped income for feet pointing along
+            #    base forward - bounded, deadzone-free, gradient maximal at the
+            #    90-deg splay; healthy gait earns +0.97/step at w=1.0.
+            # 2) hip_yaw_posture reworked: deadzone 0.45 REMOVED (the deadzone
+            #    itself was exp2.9's L parking spot at +36~43 deg), quadratic
+            #    from zero, cap -2.0, weight -1.0 -> -0.8.
+            # 3) yaw_rate_straight: deadzone 0.03 -> 0 (third hide-under-
+            #    threshold event: 0.049<0.08, 0.0143<0.03), slope 2.5.
+            feet_heading_align = 1.0
+            hip_yaw_posture = -0.8
             yaw_rate_straight = -0.5
             # gait
             feet_air_time = 1.2
@@ -438,7 +440,9 @@ class X1DHStandCfg(LeggedRobotCfg):
             default_joint_pos = 1.0
             orientation = 1.
             feet_rotation = 0.3
-            feet_yaw_align = 0.4  # exp1.1: penalize foot toe-out yaw relative to base
+            # exp2.10: RETIRED to 0 - superseded by feet_heading_align (cos-shaped,
+            # same quat-projected measurement, no saturation, no deadzone).
+            feet_yaw_align = 0.0
             base_height = 0.2
             base_acc = 0.2
             # energy

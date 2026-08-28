@@ -933,26 +933,32 @@ class X1DHStandEnv(LeggedRobot):
         return reward * active_command
 
     def _reward_hip_yaw_posture(self):
-        """exp2.7: soft wall on hip_yaw joint deviation from the mirrored default.
+        """exp2.10: deadzone-free soft wall on hip_yaw deviation from mirrored default.
 
-        exp2.6 replay proved a STATIC posture local optimum: L hip_yaw locked at
-        +1.0~+1.4 rad from t=0 (default is -0.31; deviation up to 1.74 rad while
-        STANDING), corr(dev_L, wz_ema)=+0.12 ~= 0 -> not a turning actuator but a
-        learned crutch stance. The existing default_joint_pos gaussian
-        exp(-100*norm) saturates to zero gradient beyond ~0.45 rad deviation
-        (exp(-150) at 1.52 rad), so once the policy slides into the splay
-        posture nothing pulls it back. This wall adds a QUADRATIC penalty with a
-        0.45 rad deadzone - zero overlap with the live gaussian inside, an
-        ever-steepening gradient outside (d/dx = -2*(dev-0.45)):
-            dev 0.6  -> -0.02/step    dev 1.0 -> -0.30/step
-            dev 1.52 (exp2.6 L) -> -1.14/step (-5700 over 10 s)
+        History: exp2.7's wall (deadzone 0.45 + quadratic, w=-1.0) FAILED - the
+        policy parked one hip AT the +-1.5 joint limit (98% frames in exp2.7,
+        82% frames R in exp2.9) and paid the -1.2/step constant tax anyway,
+        while the OTHER hip parked just outside the deadzone (+36~43 deg =
+        dev 0.63, paying only -0.03). The deadzone itself became a parking
+        spot; the pinned side proved the tax affordable. exp2.9 also showed
+        the pin side FLIPS between runs (L in 2.6/2.7, R in 2.9) -> it is a
+        structural affordance (any free hip can rest at the limit), not a
+        leg pathology.
+
+        exp2.10 rework: NO deadzone - quadratic from zero, cap -2.0, weight -0.8:
+            dev 0.45 (old free zone) -> -0.16/step
+            dev 0.63 (exp2.9 L spot)  -> -0.32/step (10x the old tax)
+            dev 1.55 (exp2.9 R limit) -> -1.92/step
+        Continuous gradient at every angle; paired with the positive
+        feet_heading_align income (see below) the healthy-vs-splay economic
+        swing is ~2.5/step vs exp2.7's failed single -1.2 tax.
         Target = mirrored default (L -0.31 / R +0.31) via default_joint_pd_target,
         NOT zero (exp0.20 lesson: zero target made the robot pirouette).
         """
         dev_l = torch.abs(self.dof_pos[:, 2] - self.default_joint_pd_target[:, 2])
         dev_r = torch.abs(self.dof_pos[:, 8] - self.default_joint_pd_target[:, 8])
-        pen_l = torch.clamp(dev_l - 0.45, min=0.0) ** 2
-        pen_r = torch.clamp(dev_r - 0.45, min=0.0) ** 2
+        pen_l = torch.clamp(dev_l ** 2, max=2.0)
+        pen_r = torch.clamp(dev_r ** 2, max=2.0)
         return -(pen_l + pen_r)
 
     def _reward_yaw_rate_straight(self):
@@ -971,10 +977,14 @@ class X1DHStandEnv(LeggedRobot):
         (corr with wz ~ 0), this handles the dynamic side.
         """
         straight = torch.abs(self.commands[:, 2]) < 0.05
-        # exp2.9: deadzone 0.08 -> 0.03 (exp2.7 hid its drift at 0.049, just under
-        # the old deadzone); slope 2 -> 3 steepens the climb-out gradient.
-        excess = torch.clamp(torch.abs(self._wz_ema) - 0.03, min=0.0)
-        pen = torch.clamp(excess * 3.0, max=1.0)
+        # exp2.10: deadzone 0.03 -> 0 (NO free window at all). Third documented
+        # hide-under-threshold event: exp2.7 drifted 0.049 (dz 0.08), exp2.9
+        # drifted 0.0143 (dz 0.03) - the policy reliably parks just under any
+        # deadzone. Linear-from-zero slope 2.5 (gentler: healthy EMA wobble
+        # ~0.02 pays only -0.025/step at w=-0.5, ~1.3% of typical return) but
+        # every nonzero sustained rate now pays proportionally.
+        excess = torch.abs(self._wz_ema)
+        pen = torch.clamp(excess * 2.5, max=1.0)
         return torch.where(straight, -pen, torch.zeros_like(pen))
     
     def _reward_torques(self):
@@ -1023,6 +1033,45 @@ class X1DHStandEnv(LeggedRobot):
         rel = foot_yaw - base_yaw.unsqueeze(-1)
         rel = torch.atan2(torch.sin(rel), torch.cos(rel))  # wrap to [-pi, pi]
         return torch.exp(-torch.abs(rel).sum(dim=1) * 10.0)
+
+    def _reward_feet_heading_align(self):
+        """exp2.10: POSITIVE income for feet pointing along the base forward axis.
+
+        cos-shaped, computed exactly like feet_yaw_align (quat-projected foot
+        yaw minus base yaw, no gimbal-lock) but returning mean(cos(rel)):
+
+            healthy gait (feet +-15 deg)  -> +0.97/step at w=1.0
+            exp2.9 seg1-2 (+10/-70 deg)   -> +0.41   (opportunity cost -0.56)
+            exp2.9 seg3-4 (180 deg open)  -> -0.02   (cost -0.99)
+            stand drift (feet planted,
+             base rotates +96/+72)        -> +0.10   (cost -0.87)
+
+        Why cos and not another exp(): every exp-shaped reward in this project
+        saturated to zero gradient exactly where the pathology lives (gaussian
+        anchors dead beyond 0.45 rad, feet_yaw_align exp(-10*sum) dead beyond
+        ~0.3 rad). cos() is bounded, deadzone-free AND its gradient sin() is
+        MAXIMAL at +-90 deg - the strongest pull sits precisely on the splay
+        configuration. Also earns during STAND (feet planted while base drifts
+        -> income drops), adding drift pressure without a deadzone to hide in.
+
+        Replaces feet_yaw_align (retired to w=0: wrong frame semantics were
+        never the fix; the shape was).
+        """
+        q = self.feet_quat  # (num_envs, num_feet, 4) wxyz
+        qw = q[..., 0:1]
+        qx = q[..., 1:2]
+        qy = q[..., 2:3]
+        qz = q[..., 3:4]
+        # foot local +z axis rotated to world frame
+        fwd_x = 2.0 * (qx * qz + qw * qy)
+        fwd_y = 2.0 * (qy * qz - qw * qx)
+        foot_yaw = torch.atan2(fwd_y, fwd_x).squeeze(-1)  # (num_envs, num_feet)
+        base_quat = self.root_states[:, 3:7]
+        base_yaw = torch.atan2(2.0 * (base_quat[:, 3] * base_quat[:, 2] + base_quat[:, 0] * base_quat[:, 1]),
+                               1.0 - 2.0 * (base_quat[:, 1] * base_quat[:, 1] + base_quat[:, 2] * base_quat[:, 2]))
+        rel = foot_yaw - base_yaw.unsqueeze(-1)
+        rel = torch.atan2(torch.sin(rel), torch.cos(rel))  # wrap to [-pi, pi]
+        return torch.cos(rel).mean(dim=1)
 
     def _reward_lateral_vel(self):
         """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
