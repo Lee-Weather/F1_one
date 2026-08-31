@@ -52,6 +52,24 @@ FIX_COMMAND = True
 CONTACT_THRESHOLD_N = 1.0
 CHECKPOINT_URL = None  # set from --checkpoint_url_b64 in __main__ (cloud replay mode)
 
+# exp3.1: skill replay schedule. Each entry is (num_steps, skill_cmd, label)
+# where skill_cmd 0=both / 1=lift-LEFT / 2=lift-RIGHT. Control dt is 0.01 s
+# (100 Hz), so 300 steps == 3 s and 1000 steps == 10 s. Empty by default;
+# filled by --skill_schedule in __main__.
+SKILL_SCHEDULE = []
+
+
+def current_skill(step_idx):
+    """Return (skill_cmd, label) active at control step step_idx."""
+    if not SKILL_SCHEDULE:
+        return 0, ""
+    acc = 0
+    for steps, cmd, label in SKILL_SCHEDULE:
+        if step_idx < acc + steps:
+            return cmd, label
+        acc += steps
+    return SKILL_SCHEDULE[-1][1], SKILL_SCHEDULE[-1][2]
+
 
 def current_command(step_idx):
     """Return the command_x active at control step step_idx."""
@@ -139,7 +157,8 @@ def save_diag_csv(diag, out_dir, num_actions=12, dt=0.02):
     """Write per-step diagnostics to isaac_diag.csv."""
     os.makedirs(out_dir, exist_ok=True)
     csv_path = os.path.join(out_dir, "isaac_diag.csv")
-    header = ["step", "time_s", "command_x", "base_vel_x", "base_vel_y", "base_vel_yaw",
+    header = ["step", "time_s", "command_x", "skill_cmd",
+              "base_vel_x", "base_vel_y", "base_vel_yaw",
               "base_height", "base_pos_x", "base_pos_y", "base_yaw",
               "foot_z_l", "foot_z_r", "foot_force_l", "foot_force_r",
               "foot_yaw_l", "foot_yaw_r"]
@@ -150,7 +169,7 @@ def save_diag_csv(diag, out_dir, num_actions=12, dt=0.02):
         writer = csv.writer(f)
         writer.writerow(header)
         for i in range(len(diag["command_x"])):
-            row = [i, round(i * dt, 6), diag["command_x"][i],
+            row = [i, round(i * dt, 6), diag["command_x"][i], diag["skill_cmd"][i],
                    diag["base_vel_x"][i], diag["base_vel_y"][i], diag["base_vel_yaw"][i],
                    diag["base_height"][i],
                    diag["base_pos_x"][i], diag["base_pos_y"][i], diag["base_yaw"][i],
@@ -232,6 +251,10 @@ def play(args):
     if RENDER:
         env_cfg.env.enable_headless_render = True
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    # exp3.1: skill replay targets the L3 lift height (0.12 m)
+    if SKILL_SCHEDULE:
+        env._skill_level[:] = 3
+        env._update_skill_aux(torch.arange(env.num_envs, device=env.device))
     ppo_runner, train_cfg, _ = task_registry.make_alg_runner(
         env=env, name=args.task, args=args, train_cfg=train_cfg
     )
@@ -264,7 +287,7 @@ def play(args):
     right_foot_idx = env.feet_indices[1].item()
 
     # Per-step diagnostics
-    diag = {k: [] for k in ["command_x", "base_vel_x", "base_vel_y", "base_vel_yaw",
+    diag = {k: [] for k in ["command_x", "skill_cmd", "base_vel_x", "base_vel_y", "base_vel_yaw",
                             "base_height", "base_pos_x", "base_pos_y", "base_yaw",
                             "foot_z_l", "foot_z_r",
                             "foot_force_l", "foot_force_r", "foot_yaw_l", "foot_yaw_r",
@@ -284,6 +307,20 @@ def play(args):
             env.commands[:, 2] = 0.0
             env.commands[:, 3] = 0.0
 
+        # exp3.1: skill schedule overrides the skill command each step; the
+        # grace timer only resets at a SEGMENT CHANGE (constantly zeroing it
+        # would keep post-grace incomes and evictions dead forever).
+        skill_cmd, skill_label = current_skill(i)
+        if SKILL_SCHEDULE:
+            if skill_cmd != getattr(play, "_last_skill_cmd", None):
+                env._skill_timer[:] = 0
+                play._last_skill_cmd = skill_cmd
+            env._skill_cmd[:] = skill_cmd
+            env._skill_timer += 1
+            env._update_skill_aux(torch.arange(env.num_envs, device=env.device))
+            if skill_cmd != 0:
+                env.commands[:, 0] = 0.0
+
         actions = policy(obs.detach())
         obs, critic_obs, rews, dones, infos = env.step(actions.detach())
 
@@ -293,6 +330,7 @@ def play(args):
         vel_sum += cur_vel_x
         step_accum += 1
         diag["command_x"].append(real_cmd_x)
+        diag["skill_cmd"].append(env._skill_cmd[0].item())
         diag["base_vel_x"].append(cur_vel_x)
         diag["base_vel_y"].append(env.base_lin_vel[0, 1].item())
         diag["base_vel_yaw"].append(env.base_ang_vel[0, 2].item())
@@ -393,5 +431,22 @@ if __name__ == "__main__":
     globals()["CHECKPOINT_URL"] = extract_checkpoint_url_b64(sys.argv)
     if CHECKPOINT_URL:
         print("[play_adaptive] Cloud mode: will download checkpoint from signed URL")
+    # exp3.1: --skill_schedule (no value) switches to the skill replay:
+    # 3s both -> 10s lift-LEFT -> 3s both -> 10s lift-RIGHT -> 3s both,
+    # at the L3 lift target (0.12 m). Velocities are pinned to 0 inside
+    # lift windows by the loop above.
+    if any(a == "--skill_schedule" for a in sys.argv):
+        sys.argv.remove("--skill_schedule")
+        SKILL_SCHEDULE.extend([
+            (300, 0, "both"),
+            (1000, 1, "lift-LEFT"),
+            (300, 0, "both"),
+            (1000, 2, "lift-RIGHT"),
+            (300, 0, "both"),
+        ])
+        globals()["TOTAL_STEPS"] = sum(s for s, _, _ in SKILL_SCHEDULE)
+        globals()["SKILL_SCHEDULE_ACTIVE"] = True
+        print("[play_adaptive] Skill schedule: "
+              + ", ".join(f"{lab}({s * 0.01:.0f}s)" for s, _, lab in SKILL_SCHEDULE))
     args = get_args()
     play(args)

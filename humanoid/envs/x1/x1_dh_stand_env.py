@@ -122,12 +122,18 @@ class X1DHStandEnv(LeggedRobot):
         """
         max_vel = self.cfg.domain_rand.max_push_vel_xy
         max_push_angular = self.cfg.domain_rand.max_push_ang_vel
+        # exp3.1: skill curriculum - envs inside a skill window below
+        # push_from_level are exempt (learn the static hold first, earn the
+        # push robustness at L4). Walk/stand envs keep the original schedule.
+        push_mask = ~((self._skill_cmd != 0) &
+                      (self._skill_level < self.cfg.skill.push_from_level))
+        push_mask_f = push_mask.float().unsqueeze(1)
         self.rand_push_force[:, :2] = torch_rand_float(
-            -max_vel, max_vel, (self.num_envs, 2), device=self.device)  # lin vel x/y
+            -max_vel, max_vel, (self.num_envs, 2), device=self.device) * push_mask_f  # lin vel x/y
         self.root_states[:, 7:9] = self.rand_push_force[:, :2]
 
         self.rand_push_torque = torch_rand_float(
-            -max_push_angular, max_push_angular, (self.num_envs, 3), device=self.device)  #angular vel xyz
+            -max_push_angular, max_push_angular, (self.num_envs, 3), device=self.device) * push_mask_f  #angular vel xyz
 
         self.root_states[:, 10:13] = self.rand_push_torque
         self.gym.set_actor_root_state_tensor(
@@ -179,6 +185,22 @@ class X1DHStandEnv(LeggedRobot):
         stance_mask[:, 1] = sin_pos < 0
         # Add double support phase
         stance_mask[torch.abs(sin_pos) < 0.1] = 1
+
+        # exp3.1: during a skill window the expectation is EXPLICIT - the
+        # commanded foot swings, the other is stance - regardless of the
+        # (frozen) gait phase. Every phase-mask consumer becomes skill-aware
+        # for free: feet_contact_number pays single support, swing_contact
+        # punishes lifted-foot touches, feet_clearance targets the lifted
+        # foot, base_height averages over the support foot only.
+        skill_active = self._skill_cmd != 0
+        if torch.any(skill_active):
+            skill_mask = torch.ones_like(stance_mask)
+            lift_l = self._skill_cmd == 1
+            lift_r = self._skill_cmd == 2
+            skill_mask[lift_l, 0] = 0.  # lift LEFT -> left swings
+            skill_mask[lift_r, 1] = 0.  # lift RIGHT -> right swings
+            stance_mask = torch.where(
+                skill_active.unsqueeze(1), skill_mask, stance_mask)
 
         # stand mask == 1 means stand leg
         return stance_mask
@@ -274,12 +296,83 @@ class X1DHStandEnv(LeggedRobot):
             self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         # self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.05).unsqueeze(1)
         
+    def _resample_skill(self, env_ids):
+        """exp3.1: draw a fresh skill command (both / lift-L / lift-R) for env_ids.
+
+        Skill windows force stand commands (commands[:, :3] = 0) so the gait
+        phase freezes (_get_phase stand branch) and every walk income turns
+        into a stand income; envs leaving the skill draw fresh walk commands.
+        Onset position anchors the drift eviction.
+        """
+        if len(env_ids) == 0:
+            return
+        p = self.cfg.skill.lift_probs
+        rand = torch.rand(len(env_ids), device=self.device)
+        skill = torch.zeros(len(env_ids), dtype=torch.long, device=self.device)
+        skill[(rand >= p[0]) & (rand < p[0] + p[1])] = 1
+        skill[rand >= p[0] + p[1]] = 2
+        self._skill_cmd[env_ids] = skill
+        self._skill_timer[env_ids] = 0
+        self._skill_drop_steps[env_ids] = 0
+        self._skill_lost_steps[env_ids] = 0
+        self._skill_hold_steps[env_ids] = 0
+        self._skill_onset_pos[env_ids] = self.root_states[env_ids, :2]
+        # entering walk mode -> refresh the locomotion command immediately
+        walk_ids = env_ids[skill == 0]
+        if len(walk_ids) > 0:
+            self._resample_walk_omnidirectional_command(walk_ids)
+        # skill windows pin stand commands
+        skill_ids = env_ids[skill != 0]
+        if len(skill_ids) > 0:
+            self.commands[skill_ids, :3] = 0.
+        self._update_skill_aux(env_ids)
+
+    def _update_skill_aux(self, env_ids):
+        """exp3.1: refresh obs one-hot, height target and ref-pose deltas.
+
+        Pure function of (_skill_cmd, _skill_level) for the given envs; called
+        from _resample_skill, the curriculum update in reset_idx, and the
+        replay script (deterministic skill schedule).
+        """
+        if len(env_ids) == 0:
+            return
+        cmd = self._skill_cmd[env_ids]
+        lvl = (self._skill_level[env_ids] - 1).clamp(0, len(self.cfg.skill.height_levels) - 1)
+        h = self._skill_height_levels[lvl]
+        onehot = torch.zeros(len(env_ids), 4, device=self.device)
+        onehot[torch.arange(len(env_ids), device=self.device), cmd] = 1.0
+        # height command (normalized by the L3/4 ceiling); 0 when idle
+        onehot[:, 3] = torch.where(cmd == 0, torch.zeros_like(h),
+                                   h / self.cfg.skill.height_levels[-1])
+        self._skill_onehot[env_ids] = onehot
+        self._skill_h_target[env_ids] = torch.where(cmd == 0, torch.zeros_like(h), h)
+        # ref pose: deltas live ONLY on the lifted leg, scaled by level height
+        scale = (h / self.cfg.skill.nominal_height).unsqueeze(1)
+        delta = torch.zeros(len(env_ids), self.num_actions, device=self.device)
+        lift_l = cmd == 1
+        lift_r = cmd == 2
+        if torch.any(lift_l):
+            delta[lift_l, :6] = self._skill_lift_delta_l.unsqueeze(0) * scale[lift_l]
+        if torch.any(lift_r):
+            delta[lift_r, 6:] = self._skill_lift_delta_r.unsqueeze(0) * scale[lift_r]
+        self._skill_ref_delta[env_ids] = delta
+
     def _post_physics_step_callback(self):
         """ Callback called before computing terminations, rewards, and observations
             Default behaviour: Compute ang vel command based on target and heading, compute measured terrain heights and randomly push robots
         """
         self.phase_length_buf += 1
         self._resample_commands()
+        # exp3.1: skill command resampling (every resample_time) + pinning.
+        # Runs AFTER _resample_commands so gait-schedule events firing inside
+        # a skill window cannot leak walk commands into it (re-zeroed here).
+        self._skill_timer += 1
+        due = (self._skill_timer >= self._skill_resample_steps).nonzero(as_tuple=False).flatten()
+        if len(due) > 0:
+            self._resample_skill(due)
+        skill_active = self._skill_cmd != 0
+        if torch.any(skill_active):
+            self.commands[skill_active, :3] = 0.
         # exp1.2: EMA-smooth the commanded planar speed (tau ~ 0.5 s) so the
         # gait cycle scales continuously across command changes.
         with torch.no_grad():
@@ -343,6 +436,19 @@ class X1DHStandEnv(LeggedRobot):
 
         # self.ref_dof_pos set ref dof pos for swing leg, ref_dof_pos=0 for stance leg
         self.ref_dof_pos += self.default_dof_pos
+
+        # exp3.1: skill windows replace the gait reference with the skill lift
+        # pose (default + level-scaled deltas on the lifted leg ONLY). This is
+        # the strongest anti-crane lever: ref_joint_pos (w=2.2) then pays the
+        # exp2.11 crane (hip_yaw -0.86 / ankle_roll +0.36 / knee 0.17) by its
+        # distance from a pose whose hip_yaw and ankle_roll deltas are ZERO.
+        skill_active = self._skill_cmd != 0
+        if torch.any(skill_active):
+            skill_ref = self.default_dof_pos + self._skill_ref_delta
+            self.ref_dof_pos = torch.where(
+                skill_active.unsqueeze(1), skill_ref, self.ref_dof_pos)
+            self.ref_action = torch.where(
+                skill_active.unsqueeze(1), 2 * self._skill_ref_delta, self.ref_action)
 
 
     def create_sim(self):
@@ -446,8 +552,11 @@ class X1DHStandEnv(LeggedRobot):
         stance_mask = self._get_stance_mask()
         contact_mask = self.contact_forces[:, self.feet_indices, 2] > 5.
 
+        # exp3.1: command_input gains 4 skill dims -> 9 total (num_single_obs
+        # 51 / single_num_privileged_obs 77 / single_linvel_index 57 in config).
         self.command_input = torch.cat(
-            (sin_pos, cos_pos, self.commands[:, :3] * self.commands_scale), dim=1)
+            (sin_pos, cos_pos, self.commands[:, :3] * self.commands_scale,
+             self._skill_onehot), dim=1)
 
         # critic no lag
         diff = self.dof_pos - self.ref_dof_pos
@@ -604,6 +713,29 @@ class X1DHStandEnv(LeggedRobot):
         # exp2.11: reset eviction counters (splay / no-progress)
         self._splay_steps[env_ids] = 0
         self._stall_steps[env_ids] = 0
+        # exp3.1: skill curriculum + counter reset.
+        # A "clean episode" = timeout end with >=3 s of skill time and >=80%
+        # single-support ratio inside the window. Two consecutive -> level up
+        # (cap 4); ANY terminated episode with >=3 s of skill time -> streak
+        # broken and level down (floor 1).
+        skill_time = self._skill_active_steps[env_ids].float() * self.dt
+        ss_ratio = self._skill_ss_steps[env_ids].float() / \
+            self._skill_active_steps[env_ids].clamp(min=1)
+        timed_out = self.time_out_buf[env_ids]
+        clean = timed_out & (skill_time >= 3.0) & (ss_ratio >= 0.8)
+        used_skill = skill_time >= 3.0
+        lvl = self._skill_level[env_ids]
+        streak = torch.where(clean, self._skill_success_streak[env_ids] + 1,
+                             torch.zeros_like(self._skill_success_streak[env_ids]))
+        lvl = torch.where(streak >= 2, (lvl + 1).clamp(max=4), lvl)
+        lvl = torch.where(~timed_out & used_skill, (lvl - 1).clamp(min=1), lvl)
+        self._skill_level[env_ids] = lvl
+        self._skill_success_streak[env_ids] = streak
+        self._skill_drop_steps[env_ids] = 0
+        self._skill_lost_steps[env_ids] = 0
+        self._skill_hold_steps[env_ids] = 0
+        self._skill_ss_steps[env_ids] = 0
+        self._skill_active_steps[env_ids] = 0
         self.reset_buf[env_ids] = 1
         # rand 0 or 0.5
         self.gait_start[env_ids] = torch.randint(0, 2, (len(env_ids),)).to(self.device)*0.5
@@ -611,6 +743,8 @@ class X1DHStandEnv(LeggedRobot):
         #resample command
         self.generate_gait_time(env_ids)
         self._resample_commands()
+        # exp3.1: fresh skill command on reset (keeps 60/20/20 across episodes)
+        self._resample_skill(env_ids)
         
         # fill extras
         self.extras["episode"] = {}
@@ -671,6 +805,44 @@ class X1DHStandEnv(LeggedRobot):
         # for 9.6 s before the spin fall; instantaneous wz would false-trigger
         # on normal in-step wobble up to ~0.3 rad/s).
         self._wz_ema = torch.zeros(self.num_envs, device=self.device)
+        # ================= exp3.1: single-leg-standing skill state =================
+        # skill command: 0 = both feet (stand/walk), 1 = lift LEFT, 2 = lift RIGHT
+        self._skill_cmd = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        # curriculum level 1..4 (index into cfg.skill.height_levels / drop_tol_s)
+        self._skill_level = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
+        # steps since the last skill resample (grace + resample scheduling)
+        self._skill_timer = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        # eviction counters (check_termination), reset on skill resample/episode
+        self._skill_drop_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self._skill_lost_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        # consecutive clean single-support steps since onset (duration income)
+        self._skill_hold_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        # episode-cumulative skill stats for the curriculum (reset_idx)
+        self._skill_ss_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self._skill_active_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self._skill_success_streak = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        # world-frame anchor for the drift eviction
+        self._skill_onset_pos = torch.zeros(self.num_envs, 2, device=self.device)
+        # derived per-env skill aux (refreshed by _update_skill_aux):
+        #   _skill_onehot (N,4): [both, liftL, liftR, h_cmd/0.12]
+        #   _skill_h_target (N,): current lift-height target [m] (0 when idle)
+        #   _skill_ref_delta (N,12): pose deltas for compute_ref_state
+        self._skill_onehot = torch.zeros(self.num_envs, 4, device=self.device)
+        self._skill_h_target = torch.zeros(self.num_envs, device=self.device)
+        self._skill_ref_delta = torch.zeros(self.num_envs, self.num_actions, device=self.device)
+        # precomputed step tolerances from the level ladder (dt = 0.01 s)
+        self._skill_grace_steps = int(self.cfg.skill.grace_s / self.dt)
+        self._skill_resample_steps = int(self.cfg.skill.resample_time / self.dt)
+        self._skill_drop_tol = torch.tensor(
+            [int(s / self.dt) for s in self.cfg.skill.drop_tol_s],
+            device=self.device, dtype=torch.long)
+        self._skill_lost_tol = int(self.cfg.skill.lost_tol_s / self.dt)
+        self._skill_height_levels = torch.tensor(
+            self.cfg.skill.height_levels, device=self.device, dtype=torch.float)
+        self._skill_lift_delta_l = torch.tensor(
+            self.cfg.skill.lift_pose_delta_l, device=self.device, dtype=torch.float)
+        self._skill_lift_delta_r = torch.tensor(
+            self.cfg.skill.lift_pose_delta_r, device=self.device, dtype=torch.float)
 
     def check_termination(self):
         """exp2.5: extend base termination with an overspeed cutoff.
@@ -692,16 +864,16 @@ class X1DHStandEnv(LeggedRobot):
             2.0 * torch.norm(self.commands[:, :2], dim=1), min=1.5)
         self.reset_buf |= overspeed
 
-        # exp2.11: splay eviction - either hip_yaw deviating > 0.9 rad from its
-        # mirrored default for 5 consecutive steps (0.1 s). With the +-0.85
-        # target clamp the reachable dev is [-0.54, +1.16] (L) / [-1.16, +0.54]
-        # (R): each leg has exactly ONE direction that can still cross 0.9
-        # (L: q > +0.59, R: q < -0.59) - precisely the two documented cheat
-        # directions (exp2.9 R rudder at -1.49, exp2.10 both-hips +1.5 twist).
-        # The clamp corridor [0.59, 0.85] becomes pass-through, not livable.
+        # exp2.11: splay eviction - either hip_yaw deviating > 0.62 rad from
+        # its mirrored default for 5 consecutive steps (0.1 s). exp2.11 REPLAY
+        # FIX: the original 0.9 threshold was DEAD CODE - with the +-0.85
+        # target clamp the reachable dev is only 0.54 rad, so the eviction
+        # could never fire while the policy lived ON the clamp wall (L hip_yaw
+        # -0.86 for 30 s). 0.62 sits just inside the wall (dev 0.54 max):
+        # the corridor [0.62, 0.85] is now pass-through, not livable.
         dev_l = torch.abs(self.dof_pos[:, 2] - self.default_joint_pd_target[:, 2])
         dev_r = torch.abs(self.dof_pos[:, 8] - self.default_joint_pd_target[:, 8])
-        splay = (dev_l > 0.9) | (dev_r > 0.9)
+        splay = (dev_l > 0.62) | (dev_r > 0.62)
         self._splay_steps = torch.where(splay, self._splay_steps + 1,
                                         torch.zeros_like(self._splay_steps))
         self.reset_buf |= self._splay_steps >= 5
@@ -718,18 +890,72 @@ class X1DHStandEnv(LeggedRobot):
                                         torch.zeros_like(self._stall_steps))
         self.reset_buf |= self._stall_steps >= 150
 
+        # exp3.1: skill evictions - active after the grace window only, and
+        # ONLY inside skill windows (walk mode keeps the exp2.11 evictions).
+        skill_active = self._skill_cmd != 0
+        if torch.any(skill_active):
+            post_grace = skill_active & (self._skill_timer >= self._skill_grace_steps)
+            force_z = self.contact_forces[:, self.feet_indices, 2]
+            contact = force_z > self.cfg.skill.contact_force_N
+            loaded = force_z > self.cfg.skill.support_force_N
+            lift_l = self._skill_cmd == 1
+            lift_r = self._skill_cmd == 2
+            # lifted foot (left leg commanded up): index 0, else index 1
+            lift_idx = torch.where(lift_l, torch.zeros_like(self._skill_cmd),
+                                   torch.ones_like(self._skill_cmd))
+            ar = torch.arange(self.num_envs, device=self.device)
+            lifted_contact = contact[ar, lift_idx] & post_grace
+            support_contact = contact[ar, 1 - lift_idx]
+            lvl_idx = (self._skill_level - 1).clamp(
+                0, len(self.cfg.skill.drop_tol_s) - 1)
+            # (a) lifted-foot ground touch beyond the level tolerance:
+            # toe taps die at L3/4 (0.3/0.2 s), tolerated while learning L1.
+            self._skill_drop_steps = torch.where(
+                lifted_contact, self._skill_drop_steps + 1,
+                torch.zeros_like(self._skill_drop_steps))
+            drop_fail = (self._skill_drop_steps >=
+                         self._skill_drop_tol[lvl_idx]) & post_grace
+            # (b) support foot unloaded: force under support_force_N (toe-tap
+            # pivots land here too) for 0.3 s - a loaded pivot is a balance
+            # strategy, an unloaded one is a fall in progress.
+            support_loaded = loaded[ar, 1 - lift_idx]
+            self._skill_lost_steps = torch.where(
+                post_grace & ~support_loaded,
+                self._skill_lost_steps + 1,
+                torch.zeros_like(self._skill_lost_steps))
+            lost_fail = self._skill_lost_steps >= self._skill_lost_tol
+            # (c) planar drift from onset: slow-lean "dynamic balance" fails here
+            drift = (torch.norm(self.root_states[:, :2] - self._skill_onset_pos,
+                                dim=1) > self.cfg.skill.drift_limit)
+            self.reset_buf |= (post_grace & (drop_fail | lost_fail | drift))
+            # reward-side stats: hold counter runs while clean single support
+            clean_ss = (post_grace & ~contact[ar, lift_idx] & support_contact)
+            self._skill_hold_steps = torch.where(
+                clean_ss, self._skill_hold_steps + 1,
+                torch.zeros_like(self._skill_hold_steps))
+            # curriculum bookkeeping (consumed in reset_idx)
+            self._skill_ss_steps += clean_ss.long()
+            self._skill_active_steps += skill_active.long()
+
 # ================================================ Rewards ================================================== #
     def _reward_ref_joint_pos(self):
         """
         Calculates the reward based on the difference between the current joint positions and the target joint positions.
+
+        exp3.1: the skill pose is ALREADY in self.ref_dof_pos (compute_ref_state
+        branch), so the skill envs track it through the same gaussian; the old
+        stand free-pass (r=1.0) is now restricted to true stand commands
+        (cmd=0 AND skill=0) - during a skill window the policy must actually
+        reach the lift pose to earn this, no free money.
         """
         joint_pos = self.dof_pos.clone()
         pos_target = self.ref_dof_pos.clone()
-        stand_command = (torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold)
-        pos_target[stand_command] = self.default_dof_pos.clone()
+        free_stand = (torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold) \
+            & (self._skill_cmd == 0)
+        pos_target[free_stand] = self.default_dof_pos.clone()
         diff = joint_pos - pos_target
         r = torch.exp(-2 * torch.norm(diff, dim=1)) - 0.2 * torch.norm(diff, dim=1).clamp(0, 0.5)
-        r[stand_command] = 1.0
+        r[free_stand] = 1.0
         return r
 
     def _reward_feet_distance(self):
@@ -789,11 +1015,25 @@ class X1DHStandEnv(LeggedRobot):
         """
         Calculates a reward based on the number of feet contacts aligning with the gait phase.
         Rewards or penalizes depending on whether the foot contact matches the expected gait phase.
+
+        exp3.1: TWO hacks closed. (a) exp2.11's crane farmed this reward by
+        standing on one foot while tapping the other - the old stand branch
+        (mask all-stance, mean over feet) paid 0.35/step for half-matching.
+        The stand branch now demands BOTH feet loaded (bilateral gate): a
+        tap costs -0.65 vs the full 1.0. (b) skill windows: _get_stance_mask
+        is skill-aware (lifted foot = swing), so the match semantics carry
+        over unchanged - single support pays, wrong-leg support doesn't.
         """
         contact = self.contact_forces[:, self.feet_indices, 2] > 5.
         stance_mask = self._get_stance_mask().clone()
-        stance_mask[torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold] = 1
-        reward = torch.where(contact == stance_mask, 1, -0.3)
+        free_stand = (torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold) \
+            & (self._skill_cmd == 0)
+        reward = torch.where(contact == stance_mask, 1., -0.3)
+        # bilateral stand gate: both feet on the ground or the missing one pays
+        both = contact.all(dim=1)
+        stand_reward = torch.where(both, 1.0, -0.65)
+        reward = torch.where(free_stand.unsqueeze(1),
+                             stand_reward.unsqueeze(1).expand_as(reward), reward)
         return torch.mean(reward, dim=1)
 
     def _reward_orientation(self):
@@ -1160,6 +1400,99 @@ class X1DHStandEnv(LeggedRobot):
             torch.clamp(torch.abs(self.commands[:, 0]), min=0.15), max=1.0)
         return torch.cos(rel).mean(dim=1) * move_factor
 
+    # ==================== exp3.1: skill-track rewards ====================
+    # All are hard-gated on skill windows; walk/stand envs get exact 0 so
+    # the skill economy cannot leak into locomotion (and vice versa: every
+    # stand-mode free-pass above excludes skill windows).
+
+    def _skill_masks(self):
+        """Shared per-env masks for the skill rewards."""
+        active = self._skill_cmd != 0
+        post_grace = active & (self._skill_timer >= self._skill_grace_steps)
+        lift_idx = torch.where(self._skill_cmd == 1,
+                               torch.zeros_like(self._skill_cmd),
+                               torch.ones_like(self._skill_cmd))
+        ar = torch.arange(self.num_envs, device=self.device)
+        force_z = self.contact_forces[:, self.feet_indices, 2]
+        return active, post_grace, lift_idx, ar, force_z
+
+    def _reward_skill_single_support(self):
+        """Clean single support: lifted foot airborne + support foot loaded."""
+        active, post_grace, lift_idx, ar, force_z = self._skill_masks()
+        contact = force_z > self.cfg.skill.contact_force_N
+        loaded = force_z > self.cfg.skill.support_force_N
+        clean = (~contact[ar, lift_idx]) & loaded[ar, 1 - lift_idx]
+        return torch.where(post_grace, clean.float(), torch.zeros_like(clean.float()))
+
+    def _reward_skill_lift_height(self):
+        """Gaussian on the lifted sole height around the curriculum target."""
+        active, post_grace, lift_idx, ar, _ = self._skill_masks()
+        sole_z = self.rigid_state[:, self.feet_indices, 2] - self.cfg.rewards.feet_to_ankle_distance
+        h = sole_z[ar, lift_idx]
+        sigma = 0.02
+        rew = torch.exp(-((h - self._skill_h_target) ** 2) / (2 * sigma ** 2))
+        return torch.where(post_grace, rew, torch.zeros_like(rew))
+
+    def _reward_skill_stability(self):
+        """Quiescence while balancing: low lateral drift and yaw rate."""
+        active, post_grace, *_ = self._skill_masks()
+        rew = torch.exp(-(torch.abs(self.base_lin_vel[:, 1]) * 8.0
+                          + torch.abs(self._wz_ema) * 8.0))
+        return torch.where(active, rew, torch.zeros_like(rew))
+
+    def _reward_skill_foot_flat(self):
+        """Support foot flat on the ground and pointing along the base.
+
+        Same quat projection as feet_heading_align (gimbal-safe) for yaw,
+        feet_euler_xyz roll/pitch for flatness; both computed on the SUPPORT
+        foot only.
+        """
+        active, post_grace, lift_idx, ar, _ = self._skill_masks()
+        sup_idx = 1 - lift_idx
+        q = self.feet_quat[ar, sup_idx]  # (N, 4) wxyz
+        qw, qx, qy, qz = q[:, 0:1], q[:, 1:2], q[:, 2:3], q[:, 3:4]
+        fwd_x = 2.0 * (qx * qz + qw * qy)
+        fwd_y = 2.0 * (qy * qz - qw * qx)
+        foot_yaw = torch.atan2(fwd_y, fwd_x).squeeze(-1)
+        base_quat = self.root_states[:, 3:7]
+        base_yaw = torch.atan2(2.0 * (base_quat[:, 3] * base_quat[:, 2] + base_quat[:, 0] * base_quat[:, 1]),
+                               1.0 - 2.0 * (base_quat[:, 1] ** 2 + base_quat[:, 2] ** 2))
+        rel = foot_yaw - base_yaw
+        rel = torch.atan2(torch.sin(rel), torch.cos(rel))
+        flat = self.feet_euler_xyz[ar, sup_idx, :2]  # roll, pitch
+        rew = torch.exp(-torch.abs(rel) * 8.0) * torch.exp(-torch.norm(flat, dim=1) * 8.0)
+        return torch.where(post_grace, rew, torch.zeros_like(rew))
+
+    def _reward_skill_duration(self):
+        """Streak income: +0.1 per full second of continuous clean hold, cap 1.0."""
+        active, post_grace, *_ = self._skill_masks()
+        rew = torch.clamp(self._skill_hold_steps.float() * self.dt * 0.1, max=1.0)
+        return torch.where(active, rew, torch.zeros_like(rew))
+
+    def _reward_skill_posture_tax(self):
+        """Anti-crane posture tax, paid inside skill windows only.
+
+        Three walls named after the exp2.11 crane anatomy:
+          hip_yaw |dev| > 0.25 rad  (crane: -0.55 rad past default)
+          ankle_roll |q| > 0.30 rad (crane: +0.36 at the clamp wall)
+          support knee outside [0.35, 0.80] (crane: stance 0.63 vs lift 0.17)
+        Linear per-unit, total capped at 2.0; w=-1.0 -> up to -2.0/step,
+        comparable to the healthy single-support income stack.
+        """
+        active, post_grace, lift_idx, ar, _ = self._skill_masks()
+        dev_yaw = (self.dof_pos[:, [2, 8]] - self.default_joint_pd_target[:, [2, 8]]).abs()
+        tax = (dev_yaw - 0.25).clamp(min=0.).sum(dim=1)
+        tax += (self.dof_pos[:, [5, 11]].abs() - 0.30).clamp(min=0.).sum(dim=1)
+        knee = self.dof_pos[:, [3, 9]]
+        below = (0.35 - knee).clamp(min=0.)
+        above = (knee - 0.80).clamp(min=0.)
+        # only the SUPPORT knee must stay in band (the lifted knee is the pose)
+        knee_bad = torch.cat([below[:, 1:2] + above[:, 1:2],
+                              below[:, 0:1] + above[:, 0:1]], dim=1)
+        tax += knee_bad[ar, lift_idx]
+        tax = tax.clamp(max=2.0)
+        return torch.where(post_grace, -tax, torch.zeros_like(tax))
+
     def _reward_lateral_vel(self):
         """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
         return torch.exp(-torch.abs(self.base_lin_vel[:, 1]) * 20.0)
@@ -1203,7 +1536,10 @@ class X1DHStandEnv(LeggedRobot):
     
     def _reward_stand_still(self):
         # penalize motion at zero commands
-        stand_command = (torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold)
+        # exp3.1: true-stand only - a skill window holds the LIFT pose, whose
+        # distance from default is the skill's purpose, not motion noise.
+        stand_command = (torch.norm(self.commands[:, :3], dim=1) <= self.cfg.commands.stand_com_threshold) \
+            & (self._skill_cmd == 0)
         r = torch.exp(-torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1))
         r = torch.where(stand_command, r.clone(),
                         torch.zeros_like(r))

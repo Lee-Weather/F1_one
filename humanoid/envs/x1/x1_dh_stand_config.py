@@ -41,16 +41,25 @@ class X1DHStandCfg(LeggedRobotCfg):
         frame_stack = 66      #all histroy obs num
         short_frame_stack = 5   #short history step
         c_frame_stack = 3  #all histroy privileged obs num
-        num_single_obs = 47
+        # exp3.1: 47 -> 51 (+4 skill command dims at the command_input head:
+        # one-hot [both / lift-L / lift-R] + normalized lift-height target).
+        # All network dims auto-derive (num_short_obs / num_critic_obs / CNN
+        # channels); only single_linvel_index below is hand-shifted.
+        num_single_obs = 51
         num_observations = int(frame_stack * num_single_obs)
-        single_num_privileged_obs = 73
-        single_linvel_index = 53
+        # exp3.1: 73 -> 77 (same +4 command_input dims; 5+4+12*4=77)
+        single_num_privileged_obs = 77
+        # exp3.1: 53 -> 57 (position of base_lin_vel inside one privileged
+        # frame: command_input 9 + dof_pos 12 + dof_vel 12 + actions 12 + diff 12)
+        single_linvel_index = 57
         num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
         num_actions = 12
         num_envs = 4096
         episode_length_s = 24 #episode length in seconds
         use_ref_actions = False
-        num_commands = 5 # sin_pos cos_pos vx vy vz
+        # exp3.1: 5 -> 9 (sin cos vx vy wz + skill one-hot 3 + height cmd 1);
+        # only used to zero the head of the obs noise vector.
+        num_commands = 9
 
     class safety:
         # safety factors
@@ -353,6 +362,47 @@ class X1DHStandCfg(LeggedRobotCfg):
             # dominant; full-circle targets flood samples with turn-and-seek behavior.
             heading = [-0.5, 0.5]
 
+    class skill:
+        """exp3.1: single-leg standing as a COMMANDED skill (skill track opener).
+
+        exp2.11 replay verdict: the crane pose (R-support 96-100%, L hip_yaw
+        pinned at the -0.85 clamp wall, L foot hovering 8-13cm) is a highly
+        stable attractor the policy enters on its own. exp3.1 legalizes it:
+        lift income is only payable under the skill command, and the walking
+        mode's contact income becomes all-or-nothing bilateral (see
+        _reward_feet_contact_number) so the exp2.11 unilateral-tap hack
+        (farming feet_contact_number 0.83/step with one foot) dies in BOTH
+        modes simultaneously.
+        """
+        # P(skill=both / lift-LEFT / lift-RIGHT) at each 10 s resample; skill
+        # windows take 40% of training time, walk keeps the majority.
+        lift_probs = [0.6, 0.2, 0.2]
+        resample_time = 10.0   # [s] skill command resample period
+        grace_s = 1.0          # [s] settle window after skill onset before
+                               #      evictions / single-support income arm
+        support_force_N = 50.0 # [N] force needed for a foot to count as the
+                               #      LOADED support (toe-tap ~5-20N doesn't)
+        contact_force_N = 5.0  # [N] generic contact threshold (matches the
+                               #      rest of the project's contact definition)
+        lost_tol_s = 0.3       # [s] support foot airborne tolerance -> fail
+        drift_limit = 0.3      # [m] planar drift from skill onset -> fail
+        # curriculum ladder (per-env level 1..4): lift height target [m],
+        # lifted-foot ground-touch tolerance [s]. Promotion: 2 consecutive
+        # clean episodes (>=3 s skill window, >=80% single support, timeout
+        # end); demotion: any terminated episode with a >=3 s skill window.
+        height_levels = [0.04, 0.08, 0.12, 0.12]
+        drop_tol_s = [1.0, 0.5, 0.3, 0.2]
+        push_from_level = 4    # pushes apply to skill envs only from L4
+        # nominal lift pose (deltas from default, L leg; R mirrors signs of
+        # hip_pitch/hip_roll/ankle_pitch). Scaled by level_height/nominal so
+        # the pose matches the L1 0.04 m tap up to the L3/4 0.12 m lift.
+        # Anti-crane by construction: hip_yaw/ankle_roll deltas stay ZERO -
+        # the exp2.11 crane's wall-hugging (-0.86 hip_yaw, +0.36 ankle_roll)
+        # has zero support in the reference pose.
+        lift_pose_delta_l = [0.25, 0.0, 0.0, 0.55, -0.05, 0.0]
+        lift_pose_delta_r = [-0.25, 0.0, 0.0, 0.55, 0.05, 0.0]
+        nominal_height = 0.10  # [m] height the nominal pose deltas produce
+
     class rewards:
         soft_dof_pos_limit = 0.98
         soft_dof_vel_limit = 0.9
@@ -422,6 +472,16 @@ class X1DHStandCfg(LeggedRobotCfg):
             feet_heading_align = 1.0
             hip_yaw_posture = -0.8
             yaw_rate_straight = -0.5
+            # exp3.1 skill track (single-leg standing). All skill incomes are
+            # hard-gated on skill_cmd != 0; pose tracking reuses ref_joint_pos
+            # (compute_ref_state outputs the skill pose during skill windows,
+            # and the stand free-pass r=1.0 is disabled for skill envs).
+            skill_single_support = 1.5   # clean single support (loaded >=50N)
+            skill_lift_height = 1.0      # lifted sole height at level target
+            skill_stability = 0.8        # low |vy| / |wz| while balancing
+            skill_foot_flat = 0.8        # support foot flat + yaw aligned
+            skill_duration = 0.5         # continuous hold, +0.1/s capped 1.0
+            skill_posture_tax = -1.0     # hip_yaw wall / knee band / ankle wall
             # gait
             feet_air_time = 1.2
             foot_slip = -0.1
