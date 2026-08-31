@@ -1882,7 +1882,19 @@ exp2.9 全部资产（速度经济学成果）、URDF、heading off、超速终�
 从零 5000 iter、run_name=exp3.1、账号 4293、代码推送后创建（流程同 exp2.11：GitHub→任务→GitLab 镜像）。
 
 ### 7. 实验结果
-待训练完成后补充。
+**SIGN BUG 重大发现（2026-08-31，L4 冒烟日志暴露）**：
+- L4 首跑日志显示 `rew_skill_posture_tax: +0.0891`（正）——本应惩罚鹤式的税在**发钱**
+- 根因：`compute_reward` 是 `函数返回值 × 权重` 直乘（legged_robot.py L354，only_positive_rewards 只 clip 总和）。项目惯例=「正 penalty × 负权重」（swing_contact/foot_slip 均如此），但三个函数把负号写进了函数体：
+  1. `_reward_skill_posture_tax` 返回 -tax × w=-1.0 → +tax（我的错，当场修）
+  2. `_reward_hip_yaw_posture` 返回 -(pen) × w=-0.8 → **+0.8×pen（exp2.10 引入起一直如此！exp2.11 日志 +0.2459/步随外撇增大而增长）**——贴墙行为一直在拿贴墙钱，分腿吸引子久治不绝的隐藏燃料，历史解读需修正
+  3. `_reward_yaw_rate_straight` 返回 -pen × w=-0.5 → +0.5×pen（漂移奖励，exp2.7 起即如此）
+- 修复：三函数均改为返回正 penalty（负权重不变），与 exp2.10 注释的数值意图（dev 0.63 → -0.32/step）对齐
+- 教训 7：**负权重的奖励函数，函数体必须返回正 penalty**；新奖励上线先看日志符号
+- L4 冒烟任务（TASK_20260831_021/022 排队对比实验）已停；修复后 commit 以 L20 重开（用户指定）
+
+### 8. 训练记录
+- TASK_20260831_017（4090D）/021（A10）/022（L4）：排队对比实验，A10 零排队先跑，4090D/L4 排队；均因 SIGN BUG 停止
+- 现役：修复版以 L20（ESKU000005，1×L20 48G，¥8.31/h）重启——见下方任务号
 
 ---
 

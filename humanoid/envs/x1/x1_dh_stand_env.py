@@ -1275,7 +1275,14 @@ class X1DHStandEnv(LeggedRobot):
         dev_r = torch.abs(self.dof_pos[:, 8] - self.default_joint_pd_target[:, 8])
         pen_l = torch.clamp(dev_l ** 2, max=2.0)
         pen_r = torch.clamp(dev_r ** 2, max=2.0)
-        return -(pen_l + pen_r)
+        # exp3.1 SIGN FIX: this function returned -(pen) while the weight was
+        # -0.8 -> compute_reward multiplies them -> +0.8*pen = a WALL-HUGGING
+        # INCOME (exp2.11 log: +0.2459/step, growing with the splay it was
+        # supposed to punish). Convention everywhere else in this project:
+        # positive penalty x negative weight (swing_contact, foot_slip).
+        # Fixed the same way; the exp2.10 header math (-0.32/step at dev 0.63)
+        # assumed exactly this product.
+        return pen_l + pen_r
 
     def _reward_yaw_rate_straight(self):
         """exp2.7: penalize sustained yaw rate while the command says go straight.
@@ -1301,7 +1308,10 @@ class X1DHStandEnv(LeggedRobot):
         # every nonzero sustained rate now pays proportionally.
         excess = torch.abs(self._wz_ema)
         pen = torch.clamp(excess * 2.5, max=1.0)
-        return torch.where(straight, -pen, torch.zeros_like(pen))
+        # exp3.1 SIGN FIX: was torch.where(straight, -pen, 0) x weight -0.5 =
+        # +0.5*pen income for yaw drift (same double-negative as
+        # hip_yaw_posture above). Now positive penalty x negative weight.
+        return torch.where(straight, pen, torch.zeros_like(pen))
     
     def _reward_torques(self):
         """
@@ -1491,7 +1501,10 @@ class X1DHStandEnv(LeggedRobot):
                               below[:, 0:1] + above[:, 0:1]], dim=1)
         tax += knee_bad[ar, lift_idx]
         tax = tax.clamp(max=2.0)
-        return torch.where(post_grace, -tax, torch.zeros_like(tax))
+        # exp3.1 SIGN FIX: initial version returned -tax with weight -1.0 ->
+        # the L4 smoke log paid +0.0891/step FOR the crane pose. Positive
+        # penalty x negative weight, per project convention.
+        return torch.where(post_grace, tax, torch.zeros_like(tax))
 
     def _reward_lateral_vel(self):
         """exp1.1: drive body-frame lateral velocity to zero (crab-walk fix)."""
